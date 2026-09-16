@@ -1,0 +1,7 @@
+# La especificación, las constantes y la configuración del proyecto no se
+# tocan sin pasar por @petrolio1975.
+
+/REQUISITOS.md   @petrolio1975
+/include/        @petrolio1975
+/platformio.ini  @petrolio1975
+/.github/        @petrolio1975
