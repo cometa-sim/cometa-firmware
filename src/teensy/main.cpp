@@ -49,6 +49,85 @@ void abrirArchivoMETA() {
 }
 
 // -----------------------------------------------------------------------
+// Verificación de configuración (valores [VERIFICAR] de config_teensy.h
+// todavía sin confirmar)
+// -----------------------------------------------------------------------
+
+// Devuelve true si rom sigue siendo el centinela de ocho ceros: la sonda
+// todavía no fue identificada por ROM (REQUISITOS.md §5).
+bool romEsCentinela(const uint8_t rom[8]) {
+  for (uint8_t i = 0; i < 8; i++) {
+    if (rom[i] != 0x00) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Escribe "CONFIG INCOMPLETA: <nombre>" en META por cada centinela sin
+// confirmar (los valores [VERIFICAR] no se inventan).
+void reportarConfigIncompleta(const char *nombre) {
+  archivoMETA.print("CONFIG INCOMPLETA: ");
+  archivoMETA.println(nombre);
+}
+
+// Recorre las constantes marcadas [VERIFICAR] en config_teensy.h y
+// registra en META cuáles siguen sin confirmar antes de volar.
+void verificarConfiguracion() {
+  if (COMETA_MAX31865_CS_ARM_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("MAX31865_CS_ARM_PIN");
+  }
+  if (COMETA_MAX31865_CS_TUBO_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("MAX31865_CS_TUBO_PIN");
+  }
+  if (COMETA_MAX31865_WIRING == COMETA_MODO_VERIFICAR) {
+    reportarConfigIncompleta("MAX31865_WIRING");
+  }
+  if (COMETA_DS18B20_BUS_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("DS18B20_BUS_PIN");
+  }
+  {
+    const uint8_t romCassa[8] = COMETA_DS18B20_ROM_CASSA;
+    if (romEsCentinela(romCassa)) {
+      reportarConfigIncompleta("DS18B20_ROM_CASSA");
+    }
+  }
+  {
+    const uint8_t romPile[8] = COMETA_DS18B20_ROM_PILE;
+    if (romEsCentinela(romPile)) {
+      reportarConfigIncompleta("DS18B20_ROM_PILE");
+    }
+  }
+  {
+    const uint8_t romCentro[8] = COMETA_DS18B20_ROM_CENTRO;
+    if (romEsCentinela(romCentro)) {
+      reportarConfigIncompleta("DS18B20_ROM_CENTRO");
+    }
+  }
+  {
+    const uint8_t romScd[8] = COMETA_DS18B20_ROM_SCD;
+    if (romEsCentinela(romScd)) {
+      reportarConfigIncompleta("DS18B20_ROM_SCD");
+    }
+  }
+  if (COMETA_GEIGER_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("GEIGER_PIN");
+  }
+  if (COMETA_PMS5003_MOSFET_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("PMS5003_MOSFET_PIN");
+  }
+  if (COMETA_VBATT_ADC_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("VBATT_ADC_PIN");
+  }
+  if (isnan(COMETA_VBATT_DIVISOR_FACTOR)) {
+    reportarConfigIncompleta("VBATT_DIVISOR_FACTOR");
+  }
+  if (COMETA_I2C_TIMEOUT_MS == COMETA_MS_VERIFICAR) {
+    reportarConfigIncompleta("I2C_TIMEOUT_MS");
+  }
+}
+
+// -----------------------------------------------------------------------
 // GPS — SAM-M8Q (REQUISITOS.md §3.1, §3.9, §4.3, §5)
 // -----------------------------------------------------------------------
 
@@ -320,6 +399,8 @@ void setup() {
   inicializarSD();
   abrirArchivoSCI();
   abrirArchivoMETA();
+
+  verificarConfiguracion();
 
   inicializarGPS();
   inicializarSCD30();

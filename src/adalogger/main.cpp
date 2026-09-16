@@ -39,6 +39,35 @@ void abrirArchivoL2() {
 }
 
 // -----------------------------------------------------------------------
+// Verificación de configuración (valores [VERIFICAR] de
+// config_adalogger.h todavía sin confirmar). Esta placa no tiene META:
+// se informa por Serial.
+// -----------------------------------------------------------------------
+
+// Escribe "CONFIG INCOMPLETA: <nombre>" por Serial por cada centinela sin
+// confirmar (los valores [VERIFICAR] no se inventan).
+void reportarConfigIncompleta(const char *nombre) {
+  Serial.print("CONFIG INCOMPLETA: ");
+  Serial.println(nombre);
+}
+
+// Recorre las constantes marcadas [VERIFICAR] en config_adalogger.h y
+// las informa por Serial antes de volar.
+void verificarConfiguracion() {
+  Serial.begin(115200);
+
+  if (COMETA_VBATT_ADC_PIN == COMETA_PIN_VERIFICAR) {
+    reportarConfigIncompleta("VBATT_ADC_PIN");
+  }
+  if (isnan(COMETA_VBATT_DIVISOR_FACTOR)) {
+    reportarConfigIncompleta("VBATT_DIVISOR_FACTOR");
+  }
+  if (COMETA_I2C_TIMEOUT_MS == COMETA_MS_VERIFICAR) {
+    reportarConfigIncompleta("I2C_TIMEOUT_MS");
+  }
+}
+
+// -----------------------------------------------------------------------
 // GPS — SAM-M8Q propio (REQUISITOS.md §3.1, §3.9, §4.5, §5)
 // -----------------------------------------------------------------------
 
@@ -99,6 +128,8 @@ void flushLogSiCorresponde() {
 // -----------------------------------------------------------------------
 
 void setup() {
+  verificarConfiguracion();
+
   inicializarSD();
   abrirArchivoL2();
   inicializarGPS();

@@ -19,6 +19,7 @@
 #define COMETA_PIN_VERIFICAR   (-1)     // TODO VERIFICAR: pin sin confirmar
 #define COMETA_MS_VERIFICAR    (-1L)    // TODO VERIFICAR: duración sin confirmar
 #define COMETA_F_VERIFICAR     (NAN)    // TODO VERIFICAR: valor físico sin confirmar
+#define COMETA_MODO_VERIFICAR  (-1)     // TODO VERIFICAR: modo/enum sin confirmar
 
 // -----------------------------------------------------------------------
 // §1 — Estructura / reloj del sistema
@@ -34,8 +35,8 @@
 // -----------------------------------------------------------------------
 #define COMETA_GPS_I2C_ADDR         0x42
 // TODO VERIFICAR: ¿DYN_MODEL_AIRBORNE1g se guarda en flash o solo en BBR?
-// (REQUISITOS.md §3.1)
-#define COMETA_GPS_GUARDAR_EN_FLASH false
+// (REQUISITOS.md §3.1). Se decide al implementar inicializarGPS(): no es
+// un valor que se pueda fijar de antemano en una constante.
 
 // -----------------------------------------------------------------------
 // §3.2 — flush() periódico del log
@@ -81,11 +82,12 @@
 #define COMETA_SHT45_I2C_ADDR 0x44
 
 // -----------------------------------------------------------------------
-// §5 — ICM-20948 (I²C 0x69, breakout con AD0 alto; ±16 g, 100 Hz)
+// §5 — ICM-20948 (I²C 0x69, breakout con AD0 alto; ±16 g). La tasa de
+// muestreo es COMETA_IMU_TASA_HZ (§7): es la misma tasa a la que se llena
+// el buffer circular de la ventana IMU.
 // -----------------------------------------------------------------------
 #define COMETA_ICM20948_I2C_ADDR   0x69
 #define COMETA_ICM20948_RANGO_G    16
-#define COMETA_ICM20948_TASA_HZ    100
 
 // -----------------------------------------------------------------------
 // §5 — LTR390 (I²C 0x53)
@@ -102,6 +104,7 @@
 #define COMETA_MAX31865_CS_TUBO_PIN COMETA_PIN_VERIFICAR
 // TODO VERIFICAR con los puentes soldados en la placa: MAX31865_2WIRE,
 // MAX31865_3WIRE o MAX31865_4WIRE (REQUISITOS.md §5).
+#define COMETA_MAX31865_WIRING COMETA_MODO_VERIFICAR
 
 // -----------------------------------------------------------------------
 // §5 — 4x DS18B20 (1-Wire, pull-up 4.7 kΩ). Resolución 12 bits,

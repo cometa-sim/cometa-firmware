@@ -22,6 +22,7 @@
 // -----------------------------------------------------------------------
 #define COMETA_PIN_VERIFICAR (-1)   // TODO VERIFICAR: pin sin confirmar
 #define COMETA_F_VERIFICAR   (NAN)  // TODO VERIFICAR: valor físico sin confirmar
+#define COMETA_MS_VERIFICAR  (-1L)  // TODO VERIFICAR: duración sin confirmar
 
 // -----------------------------------------------------------------------
 // §3.1 — GPS en modo Airborne <1g (SAM-M8Q propio, generación M8:
@@ -29,8 +30,8 @@
 // -----------------------------------------------------------------------
 #define COMETA_GPS_I2C_ADDR 0x42
 // TODO VERIFICAR: ¿DYN_MODEL_AIRBORNE1g se guarda en flash o solo en BBR?
-// (REQUISITOS.md §3.1)
-#define COMETA_GPS_GUARDAR_EN_FLASH false
+// (REQUISITOS.md §3.1). Se decide al implementar inicializarGPS(): no es
+// un valor que se pueda fijar de antemano en una constante.
 
 // -----------------------------------------------------------------------
 // §3.2 — flush() periódico del log
@@ -42,7 +43,7 @@
 // -----------------------------------------------------------------------
 #define COMETA_I2C_RECOVERY_PULSOS_SCL 9
 // TODO VERIFICAR: timeout de recuperación (REQUISITOS.md §3.3).
-#define COMETA_I2C_TIMEOUT_MS (-1L)
+#define COMETA_I2C_TIMEOUT_MS COMETA_MS_VERIFICAR
 
 // -----------------------------------------------------------------------
 // §2 — Periodo de loop() no bloqueante (tick basado en millis(), sin
