@@ -12,15 +12,12 @@
 #include <SD.h>
 
 #include "config_adalogger.h"
+#include "log_format.h"
 
 // -----------------------------------------------------------------------
 // Archivo de log (REQUISITOS.md §4.1)
 // -----------------------------------------------------------------------
 File archivoL2;
-
-// Declaración adelantada: implementada más abajo junto con el log
-// (REQUISITOS.md §4).
-void escribirEncabezadoL2(File &archivo);
 
 // -----------------------------------------------------------------------
 // Arranque
@@ -102,11 +99,8 @@ void leerBateria() {
 // Log L2 (REQUISITOS.md §2, §4.2, §4.5)
 // -----------------------------------------------------------------------
 
-// Escribe el encabezado de L2_nnn.CSV con los nombres de columna exactos
-// de REQUISITOS.md §4.5.
-void escribirEncabezadoL2(File &archivo) {
-  archivo.println("t_ms,utc,lat,lon,alt_m,vz_ms,sats,fix,v_batt");
-}
+// El encabezado de L2_nnn.CSV (escribirEncabezadoL2) está en
+// include/log_format.h, compartido con src/teensy.
 
 // Compone y escribe una fila de L2_nnn.CSV a partir de las últimas
 // lecturas (celda vacía = no hubo lectura en esa fila, REQUISITOS.md §4.2).

@@ -8,6 +8,7 @@
 #include <SD.h>
 
 #include "config_teensy.h"
+#include "log_format.h"
 
 // -----------------------------------------------------------------------
 // Archivos de log (REQUISITOS.md §4.1)
@@ -15,11 +16,6 @@
 File archivoSCI;
 File archivoIMU;
 File archivoMETA;
-
-// Declaraciones adelantadas: las funciones de encabezado se implementan
-// más abajo, junto con el resto del log (REQUISITOS.md §4).
-void escribirEncabezadoSCI(File &archivo);
-void escribirEncabezadoIMU(File &archivo);
 
 // -----------------------------------------------------------------------
 // Reloj y arranque
@@ -326,30 +322,9 @@ void guardarVentanaIMU() {
 // Log SCI (REQUISITOS.md §2, §4.2, §4.3)
 // -----------------------------------------------------------------------
 
-// Escribe el encabezado de SCI_nnn.CSV con los nombres de columna exactos
-// de REQUISITOS.md §4.3.
-void escribirEncabezadoSCI(File &archivo) {
-  archivo.println(
-      "t_ms,utc,"
-      "lat,lon,alt_m,vz_ms,vn_ms,ve_ms,sats,pdop,fix,"
-      "p_hPa,t_ms8607_C,rh_ms8607,"
-      "t_arm_C,t_tubo_C,err_arm,err_tubo,"
-      "rh_sht,t_sht_C,"
-      "co2_ppm,t_scd_C,p_inviata_hPa,"
-      "t_cassa_C,t_pile_C,t_centro_C,t_scd_ds_C,"
-      "uva_raw,uv_gain,uv_res,"
-      "ax,ay,az,gx,gy,gz,mx,my,mz,"
-      "pms_on,pm1,pm25,pm10,n03,n05,n10,"
-      "cpi,dt_ms,"
-      "q_pms,q_rh,q_arm,q_tubo,q_p,"
-      "v_batt,i2c_recov,loop_ms");
-}
-
-// Escribe el encabezado de IMU_nnn.CSV con los nombres de columna exactos
-// de REQUISITOS.md §4.6.
-void escribirEncabezadoIMU(File &archivo) {
-  archivo.println("t_ms,ax,ay,az,gx,gy,gz,mx,my,mz");
-}
+// Los encabezados de SCI_nnn.CSV y de IMU_nnn.CSV (escribirEncabezadoSCI,
+// escribirEncabezadoIMU) están en include/log_format.h, compartido con
+// src/adalogger.
 
 // Compone y escribe una fila de SCI_nnn.CSV a partir de las últimas
 // lecturas (celda vacía = no hubo lectura en esa fila, REQUISITOS.md §4.2).
