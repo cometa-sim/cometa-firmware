@@ -27,6 +27,12 @@ Los valores marcados **[VERIFICAR]** no están confirmados: no se inventan, se m
 
 No comparten bus, alimentación ni masa. El código de una placa no debe asumir nada de la otra: la única relación entre los dos logs es el **UTC**.
 
+### 2.1 Alimentación
+
+- El pack de baterías del Adalogger se conecta por el pin **USB** a través de un diodo (**1N5819** o **1N5817**), **nunca** por el conector **JST BAT**. Por eso el pin `A7` de fábrica del Feather M0 (pensado para medir la batería del JST) **no sirve** para medir este pack: hace falta un divisor propio en otro pin.
+- Divisores de tensión de batería: **100 kΩ / 100 kΩ** en `A1` (Adalogger), **100 kΩ / 33 kΩ** en `A0` (Teensy).
+- Regla: el **interruptor del nivel 3 en OFF antes de enchufar el USB**.
+
 ## 3. Requisitos del firmware (manual, cap. 7)
 
 1. **GPS en modo Airborne <1g** en ambos receptores. En **cada arranque**: enviar `DYN_MODEL_AIRBORNE1g`, releer con `getDynamicModel()`, registrar el resultado en `META`. El SAM-M8Q es generación M8: usar los métodos legacy (CFG-NAV5), **no** `setVal`/VALSET. Guardado en flash o solo BBR: **[VERIFICAR]**.
@@ -38,7 +44,7 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 7. **Datos fuera de especificación se marcan, no se descartan** (ver §4.4).
 8. **Reloj del Teensy a 150 MHz** (rango aceptable 150–300). Frecuencias disponibles en el core instalado o `set_arm_clock()`: **[VERIFICAR]**.
 9. **UTC del GPS** en ambos logs. Verificación con prueba en auto (prueba 12).
-10. **Tensión de batería** por ADC en ambas placas. Pin y divisor: **[VERIFICAR]**.
+10. **Tensión de batería** por ADC en ambas placas: Teensy en `A0` (divisor 100 kΩ/33 kΩ), Adalogger en `A1` (divisor 100 kΩ/100 kΩ). Ver §2.1.
 
 El termostato del pad calefactor **no** forma parte de la configuración de vuelo: no se implementa ahora.
 
@@ -113,17 +119,17 @@ Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada 
 | SHT45 | I²C | 0x44 | en el brazo exterior |
 | ICM-20948 | I²C | **0x69** | breakout con AD0 alto, no 0x68. ±16 g, 100 Hz |
 | LTR390 | I²C | 0x53 | |
-| 2 × MAX31865 | SPI | CS distintos **[VERIFICAR pines]** | |
-| PMS5003 | UART | `Serial1` | |
-| 4 × DS18B20 | 1-Wire | un pin, pull-up 4,7 kΩ **[VERIFICAR pin]** | |
-| GGreg20 | interrupción | vía optoacoplador **[VERIFICAR pin]** | |
+| 2 × MAX31865 | SPI | CS: brazo exterior pin **10**, tubo pin **9** | 3 hilos |
+| PMS5003 | UART | `Serial1` | MOSFET en pin **4** |
+| 4 × DS18B20 | 1-Wire | pin **2**, pull-up 4,7 kΩ | |
+| GGreg20 | interrupción | vía optoacoplador, pin **3** | |
 
 **MAX31865 — atención.** Los ejemplos de Adafruit son para PT100. Nuestras sondas son **PT1000**:
 
 ```cpp
 #define RREF      4300.0
 #define RNOMINAL  1000.0
-// MAX31865_3WIRE  [VERIFICAR con los puentes soldados en la placa]
+#define WIRING    MAX31865_3WIRE
 ```
 
 Con `430` / `100` el sensor devuelve números creíbles y equivocados.

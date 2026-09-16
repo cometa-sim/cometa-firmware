@@ -41,19 +41,25 @@ platformio.ini         entornos teensy41 y adalogger, librerías fijadas
 
 ## Valores pendientes de verificar
 
-Varias constantes de `REQUISITOS.md` están marcadas **[VERIFICAR]**: no se
-inventan, se miden o se consultan en la hoja de datos antes del vuelo.
-En el código aparecen con un centinela evidente (por ejemplo `-1` para un
-pin) y un comentario `// TODO VERIFICAR`. Antes de volar hay que:
+La mayoría de los pines y divisores de `REQUISITOS.md` §2.1 y §5 ya están
+decididos y fijados en `config_teensy.h`/`config_adalogger.h`. Quedan
+marcadas **[VERIFICAR]** solo dos cosas: no se inventan, se miden antes
+del vuelo. `verificarConfiguracion()` (llamada desde `setup()` en ambas
+placas) las controla en cada arranque y avisa si siguen sin confirmar
+(en `META` en el Teensy, por Serial en el Adalogger):
 
-- confirmar el timeout de recuperación I²C con la **prueba 13**,
-- medir el peor caso de clock stretching del SCD30,
-- fijar los pines de los dos MAX31865, del bus 1-Wire, del Geiger, del
-  MOSFET del PMS5003 y del divisor de batería en ambas placas,
-- identificar por ROM las cuatro sondas DS18B20 tras el montaje,
-- confirmar el modo de cableado del MAX31865 (2/3/4 hilos) con los
-  puentes soldados en la placa,
-- confirmar si `DYN_MODEL_AIRBORNE1g` se guarda en flash o solo en BBR.
+- el timeout de recuperación I²C (`COMETA_I2C_TIMEOUT_MS`): en el Teensy
+  con la **prueba 13** (peor caso de clock stretching del SCD30); en el
+  Adalogger alcanza con medirlo en banco, ya que en ese bus solo está el
+  GPS,
+- identificar por ROM las cuatro sondas DS18B20 tras el montaje (caja,
+  pilas, centro, SCD30).
+
+Aparte, dos ítems de `REQUISITOS.md` §3 no dependen de un pin ni un
+divisor y siguen sin resolver porque tampoco se pueden fijar de
+antemano: si `DYN_MODEL_AIRBORNE1g` se guarda en flash o solo en BBR
+(§3.1), y qué frecuencias acepta `set_arm_clock()` en el core instalado
+(§3.8).
 
 ## Compilar
 

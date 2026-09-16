@@ -52,16 +52,12 @@ void reportarConfigIncompleta(const char *nombre) {
 }
 
 // Recorre las constantes marcadas [VERIFICAR] en config_adalogger.h y
-// las informa por Serial antes de volar.
+// las informa por Serial antes de volar. Los demás centinelas ya se
+// fijaron a valores decididos (REQUISITOS.md §2.1): solo queda el
+// timeout I²C.
 void verificarConfiguracion() {
   Serial.begin(115200);
 
-  if (COMETA_VBATT_ADC_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("VBATT_ADC_PIN");
-  }
-  if (isnan(COMETA_VBATT_DIVISOR_FACTOR)) {
-    reportarConfigIncompleta("VBATT_DIVISOR_FACTOR");
-  }
   if (COMETA_I2C_TIMEOUT_MS == COMETA_MS_VERIFICAR) {
     reportarConfigIncompleta("I2C_TIMEOUT_MS");
   }

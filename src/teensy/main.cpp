@@ -72,20 +72,11 @@ void reportarConfigIncompleta(const char *nombre) {
 }
 
 // Recorre las constantes marcadas [VERIFICAR] en config_teensy.h y
-// registra en META cuáles siguen sin confirmar antes de volar.
+// registra en META cuáles siguen sin confirmar antes de volar. Los demás
+// centinelas de config_teensy.h ya se fijaron a valores decididos
+// (REQUISITOS.md §2.1, §5): solo quedan el timeout I²C y las cuatro ROM
+// de los DS18B20.
 void verificarConfiguracion() {
-  if (COMETA_MAX31865_CS_ARM_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("MAX31865_CS_ARM_PIN");
-  }
-  if (COMETA_MAX31865_CS_TUBO_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("MAX31865_CS_TUBO_PIN");
-  }
-  if (COMETA_MAX31865_WIRING == COMETA_MODO_VERIFICAR) {
-    reportarConfigIncompleta("MAX31865_WIRING");
-  }
-  if (COMETA_DS18B20_BUS_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("DS18B20_BUS_PIN");
-  }
   {
     const uint8_t romCassa[8] = COMETA_DS18B20_ROM_CASSA;
     if (romEsCentinela(romCassa)) {
@@ -109,18 +100,6 @@ void verificarConfiguracion() {
     if (romEsCentinela(romScd)) {
       reportarConfigIncompleta("DS18B20_ROM_SCD");
     }
-  }
-  if (COMETA_GEIGER_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("GEIGER_PIN");
-  }
-  if (COMETA_PMS5003_MOSFET_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("PMS5003_MOSFET_PIN");
-  }
-  if (COMETA_VBATT_ADC_PIN == COMETA_PIN_VERIFICAR) {
-    reportarConfigIncompleta("VBATT_ADC_PIN");
-  }
-  if (isnan(COMETA_VBATT_DIVISOR_FACTOR)) {
-    reportarConfigIncompleta("VBATT_DIVISOR_FACTOR");
   }
   if (COMETA_I2C_TIMEOUT_MS == COMETA_MS_VERIFICAR) {
     reportarConfigIncompleta("I2C_TIMEOUT_MS");

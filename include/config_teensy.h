@@ -11,15 +11,15 @@
 
 #include <Arduino.h>
 #include <math.h>
+#include <Adafruit_MAX31865.h>
 
 // -----------------------------------------------------------------------
-// Centinelas para valores [VERIFICAR]: valores imposibles en la práctica,
-// para que el placeholder sea evidente en vez de un número creíble.
+// Centinela para el único valor [VERIFICAR] que queda fuera de las ROM
+// de los DS18B20: el timeout de recuperación I²C. Es un valor imposible
+// en la práctica, para que el placeholder sea evidente en vez de un
+// número creíble.
 // -----------------------------------------------------------------------
-#define COMETA_PIN_VERIFICAR   (-1)     // TODO VERIFICAR: pin sin confirmar
-#define COMETA_MS_VERIFICAR    (-1L)    // TODO VERIFICAR: duración sin confirmar
-#define COMETA_F_VERIFICAR     (NAN)    // TODO VERIFICAR: valor físico sin confirmar
-#define COMETA_MODO_VERIFICAR  (-1)     // TODO VERIFICAR: modo/enum sin confirmar
+#define COMETA_MS_VERIFICAR (-1L)  // TODO VERIFICAR: duración sin confirmar
 
 // -----------------------------------------------------------------------
 // §1 — Estructura / reloj del sistema
@@ -97,21 +97,17 @@
 // -----------------------------------------------------------------------
 // §5 — 2x MAX31865 (SPI) para sondas PT1000 (brazo exterior y tubo)
 // -----------------------------------------------------------------------
-#define COMETA_MAX31865_RREF     4300.0
-#define COMETA_MAX31865_RNOMINAL 1000.0
-// TODO VERIFICAR pines: CS distinto para cada MAX31865 (REQUISITOS.md §5).
-#define COMETA_MAX31865_CS_ARM_PIN  COMETA_PIN_VERIFICAR
-#define COMETA_MAX31865_CS_TUBO_PIN COMETA_PIN_VERIFICAR
-// TODO VERIFICAR con los puentes soldados en la placa: MAX31865_2WIRE,
-// MAX31865_3WIRE o MAX31865_4WIRE (REQUISITOS.md §5).
-#define COMETA_MAX31865_WIRING COMETA_MODO_VERIFICAR
+#define COMETA_MAX31865_RREF        4300.0
+#define COMETA_MAX31865_RNOMINAL    1000.0
+#define COMETA_MAX31865_CS_ARM_PIN  10  // brazo exterior
+#define COMETA_MAX31865_CS_TUBO_PIN 9   // tubo
+#define COMETA_MAX31865_WIRING      MAX31865_3WIRE
 
 // -----------------------------------------------------------------------
 // §5 — 4x DS18B20 (1-Wire, pull-up 4.7 kΩ). Resolución 12 bits,
 // setWaitForConversion(false): nunca bloquear el loop 750 ms.
 // -----------------------------------------------------------------------
-// TODO VERIFICAR pin: bus 1-Wire compartido por las cuatro sondas.
-#define COMETA_DS18B20_BUS_PIN COMETA_PIN_VERIFICAR
+#define COMETA_DS18B20_BUS_PIN 2  // bus 1-Wire compartido por las cuatro sondas
 #define COMETA_DS18B20_RESOLUCION_BITS 12
 
 // TODO VERIFICAR: identificar las cuatro ROM antes del montaje (caja,
@@ -124,25 +120,23 @@
 // -----------------------------------------------------------------------
 // §5 — Geiger GGreg20 (interrupción vía optoacoplador)
 // -----------------------------------------------------------------------
-// TODO VERIFICAR pin de interrupción (REQUISITOS.md §5).
-#define COMETA_GEIGER_PIN COMETA_PIN_VERIFICAR
+#define COMETA_GEIGER_PIN 3  // interrupción vía optoacoplador
 
 // -----------------------------------------------------------------------
 // §3.6, §6 — PMS5003 (UART Serial1, controlado por MOSFET)
 // -----------------------------------------------------------------------
 #define COMETA_PMS5003_SERIAL Serial1
-// TODO VERIFICAR pin: control del MOSFET de alimentación del PMS5003.
-#define COMETA_PMS5003_MOSFET_PIN COMETA_PIN_VERIFICAR
+#define COMETA_PMS5003_MOSFET_PIN 4  // control del MOSFET de alimentación
 #define COMETA_PMS_ALTITUD_TECHO_M  5000.0
 #define COMETA_PMS_APAGAR_BAJO_C    (-15.0)
 #define COMETA_PMS_ENCENDER_SOBRE_C (-12.0)
 
 // -----------------------------------------------------------------------
-// §3.10, §5, §4.3 — Tensión de batería por ADC
+// §2.1, §3.10, §4.3 — Tensión de batería por ADC. Divisor 100 kΩ / 33 kΩ
+// en A0 (REQUISITOS.md §2.1).
 // -----------------------------------------------------------------------
-// TODO VERIFICAR pin y divisor resistivo (REQUISITOS.md §3.10).
-#define COMETA_VBATT_ADC_PIN        COMETA_PIN_VERIFICAR
-#define COMETA_VBATT_DIVISOR_FACTOR COMETA_F_VERIFICAR
+#define COMETA_VBATT_ADC_PIN        A0
+#define COMETA_VBATT_DIVISOR_FACTOR 4.03
 
 // -----------------------------------------------------------------------
 // §4.4 — Flags de calidad (0 = en especificación, 1 = fuera)

@@ -17,12 +17,11 @@
 #include <math.h>
 
 // -----------------------------------------------------------------------
-// Centinelas para valores [VERIFICAR]: valores imposibles en la práctica,
-// para que el placeholder sea evidente en vez de un número creíble.
+// Centinela para el único valor [VERIFICAR] que queda en esta placa: el
+// timeout de recuperación I²C. Es un valor imposible en la práctica, para
+// que el placeholder sea evidente en vez de un número creíble.
 // -----------------------------------------------------------------------
-#define COMETA_PIN_VERIFICAR (-1)   // TODO VERIFICAR: pin sin confirmar
-#define COMETA_F_VERIFICAR   (NAN)  // TODO VERIFICAR: valor físico sin confirmar
-#define COMETA_MS_VERIFICAR  (-1L)  // TODO VERIFICAR: duración sin confirmar
+#define COMETA_MS_VERIFICAR (-1L)  // TODO VERIFICAR: duración sin confirmar
 
 // -----------------------------------------------------------------------
 // §3.1 — GPS en modo Airborne <1g (SAM-M8Q propio, generación M8:
@@ -59,11 +58,13 @@
 #define COMETA_SD_CS_PIN 4
 
 // -----------------------------------------------------------------------
-// §3.10 — Tensión de batería por ADC
+// §2.1, §3.10 — Tensión de batería por ADC. El pack se conecta por el pin
+// USB a través de un diodo (1N5819/1N5817), nunca por el JST BAT: el pin
+// A7 de fábrica del Feather M0 (que mide la batería del JST) NO sirve acá.
+// Divisor propio 100 kΩ / 100 kΩ en A1 (REQUISITOS.md §2.1).
 // -----------------------------------------------------------------------
-// TODO VERIFICAR pin y divisor resistivo (REQUISITOS.md §3.10).
-#define COMETA_VBATT_ADC_PIN        COMETA_PIN_VERIFICAR
-#define COMETA_VBATT_DIVISOR_FACTOR COMETA_F_VERIFICAR
+#define COMETA_VBATT_ADC_PIN        A1
+#define COMETA_VBATT_DIVISOR_FACTOR 2.0
 
 // -----------------------------------------------------------------------
 // §4.1 — Archivo (nombres 8.3 en mayúsculas, FAT16)
