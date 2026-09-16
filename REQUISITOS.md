@@ -13,8 +13,18 @@ Los valores marcados **[VERIFICAR]** no están confirmados: no se inventan, se m
   - `adalogger` (`adafruit_feather_m0`) → código en `src/adalogger/`
   - separación con `build_src_filter`.
 - Constantes en `include/config_teensy.h` y `include/config_adalogger.h`. **Ningún número mágico en el código.**
+- Los encabezados CSV y el número de columnas de cada log están en `include/log_format.h`, compartido por las dos placas (son solo el formato de archivo, no acoplan la lógica de las dos cadenas).
 - **Versiones de librerías fijas** en `lib_deps` (versión exacta, sin `^` ni `~`). No se actualizan entre la prueba en el congelador y el vuelo.
 - La versión que vuela se marca con un tag de Git (`vuelo-1`).
+
+### 1.1 Estructura del loop
+
+`loop()` no usa `delay()`: dos tics no bloqueantes basados en `millis()`, reprogramados sumando el período (no fijándolos a `millis()` actual) para no acumular atraso.
+
+- **Teensy**: tic de **10 ms** para el ICM-20948, el buffer circular y el disparo de la ventana IMU (§7); tic de **1000 ms** para el resto de los sensores y el log SCI.
+- **Adalogger**: un solo tic de **1000 ms** para el log L2.
+
+Si un tic se atrasa más de un período (por ejemplo, por el `flush()` de la SD o el clock stretching del SCD30 en el tic de 1000 ms), se realinea a `millis()` actual en vez de intentar recuperar el atraso disparando varias veces seguidas.
 
 ## 2. Las dos cadenas son independientes
 
@@ -31,6 +41,9 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 
 - El pack de baterías del Adalogger se conecta por el pin **USB** a través de un diodo (**1N5819** o **1N5817**), **nunca** por el conector **JST BAT**. Por eso el pin `A7` de fábrica del Feather M0 (pensado para medir la batería del JST) **no sirve** para medir este pack: hace falta un divisor propio en otro pin.
 - Divisores de tensión de batería: **100 kΩ / 100 kΩ** en `A1` (Adalogger), **100 kΩ / 33 kΩ** en `A0` (Teensy).
+  - Adalogger: el divisor va sobre el positivo del pack, **antes** del diodo.
+  - Teensy: el divisor va **después** del interruptor del nivel 3 (mide la tensión que realmente llega a la placa, no la del pack).
+  - En los dos: un cerámico de **100 nF** entre el punto medio del divisor y GND.
 - Regla: el **interruptor del nivel 3 en OFF antes de enchufar el USB**.
 
 ## 3. Requisitos del firmware (manual, cap. 7)
@@ -120,9 +133,11 @@ Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada 
 | ICM-20948 | I²C | **0x69** | breakout con AD0 alto, no 0x68. ±16 g, 100 Hz |
 | LTR390 | I²C | 0x53 | |
 | 2 × MAX31865 | SPI | CS: brazo exterior pin **10**, tubo pin **9** | 3 hilos |
-| PMS5003 | UART | `Serial1` | MOSFET en pin **4** |
+| PMS5003 | UART | `Serial1`: RX pin **0**, TX pin **1** | MOSFET en pin **4** |
 | 4 × DS18B20 | 1-Wire | pin **2**, pull-up 4,7 kΩ | |
 | GGreg20 | interrupción | vía optoacoplador, pin **3** | |
+
+**I²C (Teensy).** SDA en pin **18**, SCL en pin **19** (bus por defecto de `Wire` en el Teensy 4.1).
 
 **MAX31865 — atención.** Los ejemplos de Adafruit son para PT100. Nuestras sondas son **PT1000**:
 
@@ -148,6 +163,7 @@ Con `430` / `100` el sensor devuelve números creíbles y equivocados.
 ## 7. Ventana IMU alrededor del estallido
 
 - **Buffer circular en RAM siempre activo**, 100 Hz, en binario, de al menos **30 s**. No se escribe en la SD hasta el disparo.
+- La IMU se lee desde la **FIFO interna** del ICM-20948 (que muestrea a 100 Hz por su cuenta): el tic de 10 ms (§1.1) vacía todas las muestras presentes en la FIFO en cada pasada, así un retraso del tic de 1000 ms (clock stretching del SCD30, GPS, `flush()` de la SD) no pierde muestras de la IMU. Cada muestra conserva su propio `t_ms`.
 - **Armado**: altitud GPS > 10 km, **o** `p_hPa` < 250 si el GPS no es válido.
 - **Disparo = el primero de los dos**:
   1. caída libre: |a| < 0,3 g sostenido durante ≥ 1 s;

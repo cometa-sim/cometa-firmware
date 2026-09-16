@@ -80,8 +80,9 @@ void leerGPS() {
 // Recuperación del bus I²C (REQUISITOS.md §3.3)
 // -----------------------------------------------------------------------
 
-// Si SDA queda baja: 9 pulsos en SCL y reinicializar
-// (REQUISITOS.md §3.3).
+// Si SDA queda baja: 9 pulsos en SCL y reinicializar (REQUISITOS.md
+// §3.3). Se llama desde leerGPS() cuando detecta un error o timeout, no
+// en cada vuelta de loop().
 void recuperarBusI2C() {
   // TODO
 }
@@ -126,14 +127,18 @@ void setup() {
 }
 
 void loop() {
-  recuperarBusI2C();
-
-  // Tick a 1 Hz (COMETA_TICK_L2_MS), sin delay() (REQUISITOS.md §4.1).
+  // Tick a 1 Hz (COMETA_TICK_L2_MS), sin delay() (REQUISITOS.md §4.1). Se
+  // reprograma sumando el período, no fijándolo a "ahora", para no
+  // acumular atraso; si se atrasó más de un período completo, se
+  // realinea a "ahora" en vez de intentar recuperarlo.
   const unsigned long ahora = millis();
   static unsigned long ultimoTickL2 = 0;
 
   if (ahora - ultimoTickL2 >= COMETA_TICK_L2_MS) {
-    ultimoTickL2 = ahora;
+    ultimoTickL2 += COMETA_TICK_L2_MS;
+    if (ahora - ultimoTickL2 >= COMETA_TICK_L2_MS) {
+      ultimoTickL2 = ahora;
+    }
 
     leerGPS();
     leerBateria();

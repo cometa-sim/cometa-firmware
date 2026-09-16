@@ -47,9 +47,10 @@
 // §2, §7 — Periodos de loop() no bloqueante (ticks basados en millis(),
 // sin delay())
 // -----------------------------------------------------------------------
-// Tick rápido: ICM-20948 y buffer/disparo de la ventana IMU a 100 Hz
-// (REQUISITOS.md §7).
-#define COMETA_TICK_IMU_MS 10UL
+// Tick rápido: ICM-20948 y buffer/disparo de la ventana IMU, derivado de
+// COMETA_IMU_TASA_HZ (§7) para no duplicar la tasa de muestreo en dos
+// constantes: a 100 Hz da 10 ms.
+#define COMETA_TICK_IMU_MS (1000UL / COMETA_IMU_TASA_HZ)
 // Tick lento: el resto de los sensores y el log SCI a 1 Hz
 // (REQUISITOS.md §4.1).
 #define COMETA_TICK_SCI_MS 1000UL
@@ -133,7 +134,9 @@
 
 // -----------------------------------------------------------------------
 // §2.1, §3.10, §4.3 — Tensión de batería por ADC. Divisor 100 kΩ / 33 kΩ
-// en A0 (REQUISITOS.md §2.1).
+// en A0, colocado DESPUÉS del interruptor del nivel 3 (mide lo que
+// realmente llega al Teensy), con un cerámico de 100 nF entre el punto
+// medio del divisor y GND (REQUISITOS.md §2.1).
 // -----------------------------------------------------------------------
 #define COMETA_VBATT_ADC_PIN        A0
 #define COMETA_VBATT_DIVISOR_FACTOR 4.03
