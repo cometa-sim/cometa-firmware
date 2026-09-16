@@ -42,7 +42,9 @@
 // §3.3 — Recuperación del bus I²C (9 pulsos en SCL si SDA queda baja)
 // -----------------------------------------------------------------------
 #define COMETA_I2C_RECOVERY_PULSOS_SCL 9
-// TODO VERIFICAR: timeout de recuperación (REQUISITOS.md §3.3).
+// TODO VERIFICAR: timeout de recuperación (REQUISITOS.md §3.3). A
+// diferencia del Teensy, en este bus solo está el GPS (sin SCD30): no
+// depende de la prueba 13, alcanza con medirlo en banco.
 #define COMETA_I2C_TIMEOUT_MS COMETA_MS_VERIFICAR
 
 // -----------------------------------------------------------------------
