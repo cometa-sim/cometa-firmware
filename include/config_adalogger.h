@@ -45,6 +45,12 @@
 #define COMETA_I2C_TIMEOUT_MS (-1L)
 
 // -----------------------------------------------------------------------
+// §2 — Periodo de loop() no bloqueante (tick basado en millis(), sin
+// delay()): un solo tick a 1 Hz para el log L2 (REQUISITOS.md §4.1).
+// -----------------------------------------------------------------------
+#define COMETA_TICK_L2_MS 1000UL
+
+// -----------------------------------------------------------------------
 // §2 — SD: chip select pin 4
 // -----------------------------------------------------------------------
 #define COMETA_SD_CS_PIN 4

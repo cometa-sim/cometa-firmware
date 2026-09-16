@@ -42,13 +42,6 @@ void abrirArchivoSCI() {
   escribirEncabezadoSCI(archivoSCI);
 }
 
-// Crea IMU_nnn.CSV y escribe su encabezado; no se escribe en la SD hasta
-// el disparo de la ventana (REQUISITOS.md §4.1, §4.6, §7).
-void abrirArchivoIMU() {
-  // TODO: crear el archivo con el primer nnn libre.
-  escribirEncabezadoIMU(archivoIMU);
-}
-
 // Crea META_nnn.TXT (datos que no cambian durante el vuelo,
 // REQUISITOS.md §4.1, §4.7).
 void abrirArchivoMETA() {
@@ -198,7 +191,7 @@ void inicializarPMS5003() {
   // TODO
 }
 
-// Apaga por encima de 5 km; por debajo, en subida, histéresis ±15/−12 °C
+// Apaga por encima de 5 km; por debajo, en subida, histéresis −15/−12 °C
 // con T exterior (PT1000 brazo); en bajada tras el estallido, se
 // reenciende por debajo de 5 km. pms_on se registra siempre
 // (REQUISITOS.md §6).
@@ -262,10 +255,13 @@ void verificarDisparoIMU() {
   // TODO
 }
 
-// Guarda la ventana (20 s antes, 90 s después del disparo) en IMU_nnn.CSV
-// y registra criterio, t_ms, UTC y altitud en META (REQUISITOS.md §4.7, §7).
+// Recién en el disparo (no antes): crea IMU_nnn.CSV, escribe su
+// encabezado y vuelca la ventana (20 s antes, 90 s después) desde el
+// buffer circular; registra criterio, t_ms, UTC y altitud en META
+// (REQUISITOS.md §4.1, §4.6, §4.7, §7).
 void guardarVentanaIMU() {
-  // TODO
+  // TODO: crear el archivo con el primer nnn libre.
+  escribirEncabezadoIMU(archivoIMU);
 }
 
 // -----------------------------------------------------------------------
@@ -323,7 +319,6 @@ void setup() {
   configurarRelojCPU();
   inicializarSD();
   abrirArchivoSCI();
-  abrirArchivoIMU();
   abrirArchivoMETA();
 
   inicializarGPS();
@@ -343,26 +338,42 @@ void setup() {
 void loop() {
   recuperarBusI2C();
 
-  leerGPS();
-  leerMS8607();
-  leerPT1000();
-  leerSHT45();
-  leerSCD30();
-  enviarPresionSCD30();
-  leerDS18B20();
-  leerLTR390();
-  leerICM20948();
-  leerPMS5003();
-  leerGeiger();
-  leerBateria();
+  const unsigned long ahora = millis();
+  static unsigned long ultimoTickIMU = 0;
+  static unsigned long ultimoTickSCI = 0;
 
-  controlarPMS5003();
-  calcularFlagsCalidad();
+  // Tick a 100 Hz (COMETA_TICK_IMU_MS): IMU y ventana del estallido
+  // (REQUISITOS.md §7).
+  if (ahora - ultimoTickIMU >= COMETA_TICK_IMU_MS) {
+    ultimoTickIMU = ahora;
 
-  actualizarBufferIMU();
-  verificarDisparoIMU();
-  guardarVentanaIMU();
+    leerICM20948();
+    actualizarBufferIMU();
+    verificarDisparoIMU();
+    guardarVentanaIMU();
+  }
 
-  escribirFilaSCI();
-  flushLogSiCorresponde();
+  // Tick a 1 Hz (COMETA_TICK_SCI_MS): resto de sensores y log SCI
+  // (REQUISITOS.md §4.1).
+  if (ahora - ultimoTickSCI >= COMETA_TICK_SCI_MS) {
+    ultimoTickSCI = ahora;
+
+    leerGPS();
+    leerMS8607();
+    leerPT1000();
+    leerSHT45();
+    leerSCD30();
+    enviarPresionSCD30();
+    leerDS18B20();
+    leerLTR390();
+    leerPMS5003();
+    leerGeiger();
+    leerBateria();
+
+    controlarPMS5003();
+    calcularFlagsCalidad();
+
+    escribirFilaSCI();
+    flushLogSiCorresponde();
+  }
 }

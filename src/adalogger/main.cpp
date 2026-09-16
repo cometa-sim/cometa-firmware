@@ -107,9 +107,17 @@ void setup() {
 void loop() {
   recuperarBusI2C();
 
-  leerGPS();
-  leerBateria();
+  // Tick a 1 Hz (COMETA_TICK_L2_MS), sin delay() (REQUISITOS.md §4.1).
+  const unsigned long ahora = millis();
+  static unsigned long ultimoTickL2 = 0;
 
-  escribirFilaL2();
-  flushLogSiCorresponde();
+  if (ahora - ultimoTickL2 >= COMETA_TICK_L2_MS) {
+    ultimoTickL2 = ahora;
+
+    leerGPS();
+    leerBateria();
+
+    escribirFilaL2();
+    flushLogSiCorresponde();
+  }
 }

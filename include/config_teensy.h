@@ -43,6 +43,17 @@
 #define COMETA_FLUSH_CADA_N_MUESTRAS 10
 
 // -----------------------------------------------------------------------
+// §2, §7 — Periodos de loop() no bloqueante (ticks basados en millis(),
+// sin delay())
+// -----------------------------------------------------------------------
+// Tick rápido: ICM-20948 y buffer/disparo de la ventana IMU a 100 Hz
+// (REQUISITOS.md §7).
+#define COMETA_TICK_IMU_MS 10UL
+// Tick lento: el resto de los sensores y el log SCI a 1 Hz
+// (REQUISITOS.md §4.1).
+#define COMETA_TICK_SCI_MS 1000UL
+
+// -----------------------------------------------------------------------
 // §3.3 — Recuperación del bus I²C (9 pulsos en SCL si SDA queda baja)
 // -----------------------------------------------------------------------
 #define COMETA_I2C_RECOVERY_PULSOS_SCL 9
