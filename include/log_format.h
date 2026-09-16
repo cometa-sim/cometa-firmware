@@ -12,6 +12,13 @@
 #include <Arduino.h>
 #include <SD.h>
 
+// Número de columnas de cada log (REQUISITOS.md §4.3, §4.5, §4.6): cada
+// fila de datos debe tener exactamente este número de campos
+// (COMETA_*_NUM_COLUMNAS - 1 comas).
+#define COMETA_SCI_NUM_COLUMNAS 56
+#define COMETA_IMU_NUM_COLUMNAS 10
+#define COMETA_L2_NUM_COLUMNAS  9
+
 // Escribe el encabezado de SCI_nnn.CSV con los nombres de columna exactos
 // de REQUISITOS.md §4.3. Usado solo por src/teensy.
 inline void escribirEncabezadoSCI(File &archivo) {

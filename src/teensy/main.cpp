@@ -123,7 +123,10 @@ void leerGPS() {
 // -----------------------------------------------------------------------
 
 // Si SDA queda baja: 9 pulsos en SCL y reinicializar. Cuenta las
-// recuperaciones en i2c_recov (REQUISITOS.md §3.3, §4.3).
+// recuperaciones en i2c_recov (REQUISITOS.md §3.3, §4.3). Se llama desde
+// las funciones de lectura I²C (leerGPS(), leerSCD30(), leerMS8607(),
+// leerSHT45(), leerLTR390(), leerICM20948()) cuando detectan un error o
+// timeout, no en cada vuelta de loop().
 void recuperarBusI2C() {
   // TODO
 }
@@ -231,8 +234,12 @@ void inicializarICM20948() {
   // TODO
 }
 
-// Lee ax, ay, az, gx, gy, gz, mx, my, mz a 100 Hz para el buffer circular
-// de la ventana IMU (REQUISITOS.md §4.3, §4.6, §7).
+// Lee ax, ay, az, gx, gy, gz, mx, my, mz desde la FIFO interna del
+// ICM-20948 (que muestrea a 100 Hz por su cuenta): vacía todas las
+// muestras presentes en la FIFO en cada pasada del tic de 10 ms, para no
+// perder muestras si el tic de 1000 ms se retrasó (clock stretching del
+// SCD30, GPS, flush de la SD). Cada muestra conserva su propio t_ms,
+// para el buffer circular de la ventana IMU (REQUISITOS.md §4.3, §4.6, §7).
 void leerICM20948() {
   // TODO
 }
@@ -371,16 +378,19 @@ void setup() {
 }
 
 void loop() {
-  recuperarBusI2C();
-
   const unsigned long ahora = millis();
   static unsigned long ultimoTickIMU = 0;
   static unsigned long ultimoTickSCI = 0;
 
   // Tick a 100 Hz (COMETA_TICK_IMU_MS): IMU y ventana del estallido
-  // (REQUISITOS.md §7).
+  // (REQUISITOS.md §7). Se reprograma sumando el período, no fijándolo a
+  // "ahora", para no acumular atraso; si se atrasó más de un período
+  // completo, se realinea a "ahora" en vez de intentar recuperarlo.
   if (ahora - ultimoTickIMU >= COMETA_TICK_IMU_MS) {
-    ultimoTickIMU = ahora;
+    ultimoTickIMU += COMETA_TICK_IMU_MS;
+    if (ahora - ultimoTickIMU >= COMETA_TICK_IMU_MS) {
+      ultimoTickIMU = ahora;
+    }
 
     leerICM20948();
     actualizarBufferIMU();
@@ -389,9 +399,12 @@ void loop() {
   }
 
   // Tick a 1 Hz (COMETA_TICK_SCI_MS): resto de sensores y log SCI
-  // (REQUISITOS.md §4.1).
+  // (REQUISITOS.md §4.1). Misma reprogramación por suma que el tick IMU.
   if (ahora - ultimoTickSCI >= COMETA_TICK_SCI_MS) {
-    ultimoTickSCI = ahora;
+    ultimoTickSCI += COMETA_TICK_SCI_MS;
+    if (ahora - ultimoTickSCI >= COMETA_TICK_SCI_MS) {
+      ultimoTickSCI = ahora;
+    }
 
     leerGPS();
     leerMS8607();
