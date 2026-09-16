@@ -159,6 +159,8 @@ Con `430` / `100` el sensor devuelve números creíbles y equivocados.
 - Por debajo de 5 km, en subida: se apaga si T exterior < −15 °C, se vuelve a encender si T > −12 °C (histéresis 3 K). Si la T no es válida, decide solo el techo de 5 km.
 - En bajada (después del estallido detectado, §7): se vuelve a encender por debajo de 5 km.
 - `pms_on` se registra **siempre**: sin eso, en el análisis no se distingue un cero de un sensor apagado.
+- **Corte real, sin fuga por TX.** El MOSFET (canal N, ya en el esquema) corta la **masa** del PMS5003, no el positivo; se mantiene porque el corte real permite reiniciar un sensor colgado, algo que en vuelo no se puede hacer a mano. Pero con la masa cortada, si `Serial1` sigue activa, su línea TX en reposo alto inyecta corriente (hasta 8 mA) por los diodos de protección del PMS y lo alimenta a medias — parece apagado y no lo está, hasta 34 mAh en 4 h (~4 % del balance) y riesgo de dejarlo en un estado indefinido. Por eso, al apagar: primero `Serial1.end()` y las líneas RX/TX en alta impedancia (`INPUT`), recién después el MOSFET a `LOW`. Al encender: primero el MOSFET a `HIGH`, después `Serial1.begin()`.
+- Tras cada encendido, descartar las primeras **30 s** de lecturas: el ventilador tarda en estabilizarse.
 
 ## 7. Ventana IMU alrededor del estallido
 

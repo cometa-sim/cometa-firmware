@@ -248,19 +248,50 @@ void leerICM20948() {
 // PMS5003 (REQUISITOS.md §3.6, §3.7, §4.3, §6)
 // -----------------------------------------------------------------------
 
+// Apaga el PMS5003: primero pone RX/TX de Serial1 en alta impedancia y
+// recién después corta la masa por el MOSFET. El MOSFET (canal N) corta
+// la masa, no la alimentación positiva: con la masa cortada, si TX
+// quedara activo su reposo en alto inyectaría corriente (hasta 8 mA) por
+// los diodos de protección del PMS y lo alimentaría a medias — parece
+// apagado y no lo está, con riesgo de dejarlo en un estado indefinido, y
+// en 4 h de vuelo son ~34 mAh (~4 % del balance de energía).
+void pmsOff() {
+  COMETA_PMS5003_SERIAL.end();
+  pinMode(COMETA_PMS5003_RX_PIN, INPUT);  // alta impedancia: nada de corriente hacia el sensor
+  pinMode(COMETA_PMS5003_TX_PIN, INPUT);
+  digitalWrite(COMETA_PMS5003_MOSFET_PIN, LOW);
+}
+
+// Enciende el PMS5003: primero el MOSFET, después Serial1 (con
+// COMETA_PMS5003_MOSFET_SETTLE_MS de por medio para el asentamiento del
+// regulador). Ese delay() bloquea el loop unos 50 ms: aceptable porque
+// solo ocurre en los cambios de estado de controlarPMS5003(), no en
+// cada vuelta. Las primeras COMETA_PMS_CALENTAMIENTO_S de lecturas tras
+// esto se descartan en leerPMS5003(): el ventilador tarda en
+// estabilizarse (REQUISITOS.md §6).
+void pmsOn() {
+  digitalWrite(COMETA_PMS5003_MOSFET_PIN, HIGH);
+  delay(COMETA_PMS5003_MOSFET_SETTLE_MS);
+  COMETA_PMS5003_SERIAL.begin(COMETA_PMS5003_BAUD);
+}
+
+// Configura COMETA_PMS5003_MOSFET_PIN como salida y llama a pmsOff()
+// para arrancar siempre en un estado conocido.
 void inicializarPMS5003() {
   // TODO
 }
 
 // Apaga por encima de 5 km; por debajo, en subida, histéresis −15/−12 °C
 // con T exterior (PT1000 brazo); en bajada tras el estallido, se
-// reenciende por debajo de 5 km. pms_on se registra siempre
-// (REQUISITOS.md §6).
+// reenciende por debajo de 5 km. Llama a pmsOn()/pmsOff() solo en los
+// cambios de estado. pms_on se registra siempre (REQUISITOS.md §6).
 void controlarPMS5003() {
   // TODO
 }
 
-// Lee pm1, pm25, pm10, n03, n05, n10 (REQUISITOS.md §4.3).
+// Lee pm1, pm25, pm10, n03, n05, n10; descarta las primeras
+// COMETA_PMS_CALENTAMIENTO_S de cada encendido, el ventilador tarda en
+// estabilizarse (REQUISITOS.md §4.3, §6).
 void leerPMS5003() {
   // TODO
 }

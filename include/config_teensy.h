@@ -124,13 +124,23 @@
 #define COMETA_GEIGER_PIN 3  // interrupción vía optoacoplador
 
 // -----------------------------------------------------------------------
-// §3.6, §6 — PMS5003 (UART Serial1, controlado por MOSFET)
+// §3.6, §6 — PMS5003 (UART Serial1, controlado por MOSFET de canal N que
+// corta la masa del sensor)
 // -----------------------------------------------------------------------
-#define COMETA_PMS5003_SERIAL Serial1
+#define COMETA_PMS5003_SERIAL   Serial1
+#define COMETA_PMS5003_RX_PIN   0
+#define COMETA_PMS5003_TX_PIN   1
+#define COMETA_PMS5003_BAUD     9600
 #define COMETA_PMS5003_MOSFET_PIN 4  // control del MOSFET de alimentación
+// Espera tras subir el MOSFET antes de abrir Serial1 (asentamiento del
+// regulador del PMS).
+#define COMETA_PMS5003_MOSFET_SETTLE_MS 50UL
 #define COMETA_PMS_ALTITUD_TECHO_M  5000.0
 #define COMETA_PMS_APAGAR_BAJO_C    (-15.0)
 #define COMETA_PMS_ENCENDER_SOBRE_C (-12.0)
+// Primeras muestras a descartar tras cada encendido: el ventilador tarda
+// en estabilizarse (REQUISITOS.md §6).
+#define COMETA_PMS_CALENTAMIENTO_S 30UL
 
 // -----------------------------------------------------------------------
 // §2.1, §3.10, §4.3 — Tensión de batería por ADC. Divisor 100 kΩ / 33 kΩ
