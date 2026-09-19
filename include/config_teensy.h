@@ -185,4 +185,16 @@
 #define COMETA_IMU_EXT  ".CSV"
 #define COMETA_META_EXT ".TXT"
 
+// -----------------------------------------------------------------------
+// §1.3 — Sensores que no responden: reintento de iniciar() y umbral de
+// lecturas fallidas consecutivas antes de marcar el sensor ausente
+// -----------------------------------------------------------------------
+#define COMETA_SENSOR_REINTENTO_MS 30000UL
+#define COMETA_SENSOR_MAX_FALLOS   5
+
+// -----------------------------------------------------------------------
+// §3.11 — Watchdog (WDT_T4, timeout en segundos)
+// -----------------------------------------------------------------------
+#define COMETA_WATCHDOG_TIMEOUT_S 8
+
 #endif  // COMETA_CONFIG_TEENSY_H

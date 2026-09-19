@@ -11,12 +11,13 @@ y 8). Si algo de este repositorio contradice un ejemplo de librería, manda
 
 ## Estado del proyecto
 
-Este repositorio contiene por ahora solo la **impalcatura** del firmware:
-estructura del proyecto, configuración de PlatformIO, constantes y las
-firmas de las funciones de cada sensor. La lógica de cada sensor todavía
-**no** está implementada (son funciones vacías con un comentario en
-español que indica el requisito de `REQUISITOS.md` al que corresponde). La
-única lógica real ya escrita es la de las cabeceras CSV (`§4`).
+El contrato del firmware ya está cerrado: formato de log, interfaz de los
+módulos de sensor, manejo de sensores ausentes y watchdog
+(`REQUISITOS.md` §1.1–§1.3, §3.11). De los sensores, solo **SHT45** está
+implementado de verdad, como módulo de ejemplo; el resto de
+`src/teensy/sensores/` son cuerpos vacíos con un comentario en español
+que indica el requisito de `REQUISITOS.md` al que corresponde, listos
+para que cada estudiante complete el suyo.
 
 ## Estructura del proyecto
 
@@ -26,12 +27,17 @@ ni masa; la única relación entre los dos logs es el UTC del GPS.
 
 ```
 include/
-  config_teensy.h      constantes de la cadena científica (Teensy 4.1)
-  config_adalogger.h   constantes de la cadena de respaldo (Feather M0)
+  config_teensy.h       constantes de la cadena científica (Teensy 4.1)
+  config_adalogger.h    constantes de la cadena de respaldo (Feather M0)
+  log_format.h           FilaSCI/FilaIMU/FilaL2, encabezados y filas CSV,
+                          generados desde una lista única de campos
+                          (REQUISITOS.md §1.2)
 src/
-  teensy/main.cpp      setup()/loop() del Teensy 4.1 (nivel 3)
-  adalogger/main.cpp   setup()/loop() del Feather M0 Adalogger (nivel 2)
-platformio.ini         entornos teensy41 y adalogger, librerías fijadas
+  teensy/main.cpp        setup()/loop(), gestor de sensores (§1.3), watchdog
+  teensy/sensores/       un módulo (.h/.cpp) por sensor (§1.2); sht45 es el
+                          único implementado de verdad
+  adalogger/main.cpp     setup()/loop() del Feather M0 Adalogger (nivel 2)
+platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 ```
 
 | Entorno | Placa | Función | Archivos de log |

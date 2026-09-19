@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <SD.h>
+#include <Adafruit_SleepyDog.h>
 
 #include "config_adalogger.h"
 #include "log_format.h"
@@ -18,6 +19,19 @@
 // Archivo de log (REQUISITOS.md §4.1)
 // -----------------------------------------------------------------------
 File archivoL2;
+
+// Fila L2 en construcción durante el tic de 1000 ms (REQUISITOS.md
+// §4.5). limpiarFilaL2() la vacía al principio de cada tic.
+FilaL2 filaL2;
+
+// -----------------------------------------------------------------------
+// Watchdog (REQUISITOS.md §3.11): Adafruit_SleepyDog, timeout
+// COMETA_WATCHDOG_TIMEOUT_S. Se alimenta (Watchdog.reset()) una sola vez
+// por pasada de loop().
+// -----------------------------------------------------------------------
+void configurarWatchdog() {
+  Watchdog.enable(COMETA_WATCHDOG_TIMEOUT_S * 1000);
+}
 
 // -----------------------------------------------------------------------
 // Arranque
@@ -71,8 +85,9 @@ void inicializarGPS() {
 }
 
 // Lee posición, altitud, vz_ms, sats, fix y UTC del GPS
-// (REQUISITOS.md §3.9, §4.5).
-void leerGPS() {
+// (REQUISITOS.md §3.9, §4.5). Vuelca en f, solo si hay un fix nuevo.
+void leerGPS(FilaL2 &f) {
+  (void)f;
   // TODO
 }
 
@@ -91,23 +106,20 @@ void recuperarBusI2C() {
 // Batería (REQUISITOS.md §3.10, §4.5)
 // -----------------------------------------------------------------------
 
-// Lee v_batt por ADC (REQUISITOS.md §3.10).
-void leerBateria() {
+// Lee v_batt por ADC (REQUISITOS.md §3.10). Vuelca en f, solo si hay un
+// dato nuevo.
+void leerBateria(FilaL2 &f) {
+  (void)f;
   // TODO
 }
 
 // -----------------------------------------------------------------------
 // Log L2 (REQUISITOS.md §2, §4.2, §4.5)
 // -----------------------------------------------------------------------
-
-// El encabezado de L2_nnn.CSV (escribirEncabezadoL2) está en
-// include/log_format.h, compartido con src/teensy.
-
-// Compone y escribe una fila de L2_nnn.CSV a partir de las últimas
-// lecturas (celda vacía = no hubo lectura en esa fila, REQUISITOS.md §4.2).
-void escribirFilaL2() {
-  // TODO
-}
+//
+// El encabezado (escribirEncabezadoL2), la struct FilaL2, limpiarFilaL2()
+// y escribirFilaL2() están en include/log_format.h, compartido con
+// src/teensy (REQUISITOS.md §1).
 
 // flush() cada COMETA_FLUSH_CADA_N_MUESTRAS muestras (REQUISITOS.md §3.2).
 void flushLogSiCorresponde() {
@@ -120,6 +132,7 @@ void flushLogSiCorresponde() {
 
 void setup() {
   verificarConfiguracion();
+  configurarWatchdog();
 
   inicializarSD();
   abrirArchivoL2();
@@ -127,6 +140,8 @@ void setup() {
 }
 
 void loop() {
+  Watchdog.reset();  // una sola vez por pasada de loop() (REQUISITOS.md §3.11)
+
   // Tick a 1 Hz (COMETA_TICK_L2_MS), sin delay() (REQUISITOS.md §4.1). Se
   // reprograma sumando el período, no fijándolo a "ahora", para no
   // acumular atraso; si se atrasó más de un período completo, se
@@ -140,10 +155,13 @@ void loop() {
       ultimoTickL2 = ahora;
     }
 
-    leerGPS();
-    leerBateria();
+    limpiarFilaL2(filaL2);
+    filaL2.t_ms = ahora;
 
-    escribirFilaL2();
+    leerGPS(filaL2);
+    leerBateria(filaL2);
+
+    escribirFilaL2(archivoL2, filaL2);
     flushLogSiCorresponde();
   }
 }

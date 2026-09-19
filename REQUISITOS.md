@@ -26,6 +26,32 @@ Los valores marcados **[VERIFICAR]** no están confirmados: no se inventan, se m
 
 Si un tic se atrasa más de un período (por ejemplo, por el `flush()` de la SD o el clock stretching del SCD30 en el tic de 1000 ms), se realinea a `millis()` actual en vez de intentar recuperar el atraso disparando varias veces seguidas.
 
+### 1.2 Módulos de sensor
+
+Cada sensor del Teensy es un módulo en `src/teensy/sensores/` (un `.h`/`.cpp` por sensor; el MAX31865 es un solo archivo con dos instancias, brazo y tubo). Todos comparten la misma interfaz, un espacio de nombres por sensor con tres funciones:
+
+```cpp
+namespace SensorXxx {
+  bool iniciar();                    // true si el sensor responde
+  bool actualizar(uint32_t ahora);   // no bloqueante; true si la lectura de esta pasada fue válida
+  void llenarFila(FilaSCI &f);       // toca solo sus propios campos, solo si hay un dato nuevo
+}
+```
+
+`actualizar()` devuelve `bool` (no `void`): es la única forma de que el gestor de sensores (§1.3) sepa si una lectura falló, para contar los 5 fallos consecutivos.
+
+`FilaSCI` (y `FilaIMU`, `FilaL2` para el Teensy y el Adalogger) son structs generadas en `include/log_format.h` a partir de una lista única de campos (nombre, tipo, decimales): de esa lista se generan también el encabezado CSV, la escritura de la fila y el número de columnas, para no repetir los nombres de columna en tres lugares distintos.
+
+`sht45.h`/`sht45.cpp` es el módulo de ejemplo: es el único sensor completamente implementado, y el resto se escribe copiando esa forma. Todos los demás módulos son solo la declaración de la interfaz y cuerpos vacíos (`// TODO`, sin llamar a ninguna librería), con un comentario que remite a la sección de este documento que describe ese sensor.
+
+### 1.3 Sensores que no responden
+
+Si `iniciar()` falla, el sensor queda **ausente**: sus celdas quedan vacías (§4.2) y el loop sigue con el resto. Se reintenta `iniciar()` cada 30 s (`COMETA_SENSOR_REINTENTO_MS`). Si el sensor ya estaba presente, 5 lecturas fallidas consecutivas de `actualizar()` (`COMETA_SENSOR_MAX_FALLOS`) lo marcan ausente con la misma regla de reintento.
+
+Esta lógica vive en un único lugar (main.cpp, o un gestor común), no en cada módulo: el estudiante que escribe un sensor solo implementa `iniciar()`/`actualizar()`/`llenarFila()`.
+
+Los intentos de `iniciar()` (el primero al arrancar y cada reintento) se cuentan en la columna `reinit` de `SCI` (§4.3). Los sensores ausentes al arranque se registran en `META` (§4.7).
+
 ## 2. Las dos cadenas son independientes
 
 | | Teensy 4.1 (nivel 3) | Feather M0 Adalogger (nivel 2) |
@@ -61,6 +87,14 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 
 El termostato del pad calefactor **no** forma parte de la configuración de vuelo: no se implementa ahora.
 
+### 3.11 Watchdog
+
+- **Teensy**: `WDT_T4`, timeout 8 s (`COMETA_WATCHDOG_TIMEOUT_S`).
+- **Adalogger**: `Adafruit_SleepyDog`, timeout 8 s (`COMETA_WATCHDOG_TIMEOUT_S`).
+- Se alimenta **una sola vez por pasada de `loop()`**, nunca dentro de un módulo de sensor: si un módulo se cuelga, el watchdog tiene que poder reiniciar la placa.
+- Versión de la librería fija en `lib_deps`, igual que el resto (§1).
+- Causa del último reinicio: se registra en `META` si el core la expone; si no, **[VERIFICAR]**.
+
 ## 4. Formato del log
 
 ### 4.1 Archivos
@@ -82,6 +116,7 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 - `t_ms`: milisegundos desde el arranque, siempre presente.
 - `utc`: ISO 8601 (`2026-10-15T13:02:05Z`), vacío hasta tener fix.
 - `vz_ms` positiva hacia arriba.
+- **Tipos de campo** (`include/log_format.h`): `t_ms` y `dt_ms` son `uint32_t`; `utc` es una cadena de hasta 20 caracteres; `lat` y `lon` son `double`; el resto de las columnas son `float`. **NAN = celda vacía** es la regla general para los campos numéricos; `utc` vacío es el mismo caso pero con cadena vacía en vez de NAN. `dt_ms`, al ser entero, usa 0 como su propio "vacío" (una duración real de 0 ms no ocurre en la práctica).
 
 ### 4.3 Columnas de `SCI`
 
@@ -99,7 +134,9 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 | PMS5003 | `pms_on`, `pm1`, `pm25`, `pm10`, `n03`, `n05`, `n10` |
 | Geiger | `cpi` (conteos en el intervalo), `dt_ms` (duración real del intervalo) |
 | Calidad | `q_pms`, `q_rh`, `q_arm`, `q_tubo`, `q_p` |
-| Sistema | `v_batt`, `i2c_recov`, `loop_ms` |
+| Sistema | `v_batt`, `i2c_recov`, `reinit`, `loop_ms` |
+
+`reinit` (después de `i2c_recov`): cuenta los intentos de `iniciar()` de todos los sensores, el primero al arrancar y cada reintento (§1.3). 57 columnas en total (`include/log_format.h`, `COMETA_SCI_NUM_COLUMNAS`).
 
 ### 4.4 Flags de calidad (0 = en especificación, 1 = fuera)
 
@@ -120,7 +157,7 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 
 ### 4.7 Contenido de `META`
 
-Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada DS18B20 con su posición, resultado de la configuración Airborne, dirección detectada de cada dispositivo I²C, y (si ocurre) el disparo de la ventana IMU: cuál criterio, `t_ms`, UTC, altitud.
+Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada DS18B20 con su posición, resultado de la configuración Airborne, dirección detectada de cada dispositivo I²C, los sensores ausentes al arranque (§1.3), la causa del último reinicio (§3.11), y (si ocurre) el disparo de la ventana IMU: cuál criterio, `t_ms`, UTC, altitud.
 
 ## 5. Sensores y constantes
 
@@ -151,7 +188,14 @@ Con `430` / `100` el sensor devuelve números creíbles y equivocados.
 
 **DS18B20.** Identificar las cuatro por ROM antes del montaje (caja, pilas, centro del volumen, SCD30). Resolución 12 bits con `setWaitForConversion(false)`: nunca bloquear el loop 750 ms.
 
-**Geiger.** La ISR solo incrementa un contador. Guardar los conteos **por intervalo** (`cpi`, `dt_ms`): sirven para el factor de Fano.
+**Geiger.** La ISR solo incrementa un contador. Guardar los conteos **por intervalo** (`cpi`, `dt_ms`): sirven para el factor de Fano. La lectura y el azaramiento del contador van en un único bloque con interrupciones deshabilitadas, para no perder ni duplicar un pulso que llegue justo en el medio:
+
+```cpp
+noInterrupts();
+uint32_t cuenta = contadorPulsos;
+contadorPulsos = 0;
+interrupts();
+```
 
 ## 6. Control del PMS5003
 
