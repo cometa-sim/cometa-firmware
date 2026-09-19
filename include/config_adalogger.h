@@ -74,4 +74,9 @@
 #define COMETA_L2_PREFIJO "L2_"
 #define COMETA_L2_EXT     ".CSV"
 
+// -----------------------------------------------------------------------
+// §3.11 — Watchdog (Adafruit_SleepyDog, timeout en segundos)
+// -----------------------------------------------------------------------
+#define COMETA_WATCHDOG_TIMEOUT_S 8
+
 #endif  // COMETA_CONFIG_ADALOGGER_H

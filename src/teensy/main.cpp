@@ -1,14 +1,29 @@
 // COMETA · Teensy 4.1 (nivel 3) — cadena científica completa
 //
-// Impalcatura del firmware: setup()/loop() llaman a funciones declaradas
-// pero vacías, una por sensor. La única lógica implementada de verdad es
-// la escritura del encabezado CSV (REQUISITOS.md §4).
+// Contrato del firmware (REQUISITOS.md §1.2, §1.3): cada sensor es un
+// módulo en src/teensy/sensores/ con la interfaz común iniciar()/
+// actualizar()/llenarFila(). main.cpp arma la fila SCI, recorre los
+// módulos con un gestor genérico (reintentos y ausencia, REQUISITOS.md
+// §1.3) y escribe el log. Solo SHT45 está implementado de verdad: el
+// resto son cuerpos vacíos a completar por los estudiantes.
 
 #include <Arduino.h>
 #include <SD.h>
+#include <Watchdog_t4.h>
 
 #include "config_teensy.h"
 #include "log_format.h"
+
+#include "sensores/ds18b20.h"
+#include "sensores/geiger.h"
+#include "sensores/gps.h"
+#include "sensores/icm20948.h"
+#include "sensores/ltr390.h"
+#include "sensores/max31865.h"
+#include "sensores/ms8607.h"
+#include "sensores/pms5003.h"
+#include "sensores/scd30.h"
+#include "sensores/sht45.h"
 
 // -----------------------------------------------------------------------
 // Archivos de log (REQUISITOS.md §4.1)
@@ -16,6 +31,24 @@
 File archivoSCI;
 File archivoIMU;
 File archivoMETA;
+
+// Fila SCI en construcción durante el tic de 1000 ms (REQUISITOS.md
+// §4.3). limpiarFilaSCI() la vacía al principio de cada tic; cada
+// módulo de sensor completa solo sus propios campos.
+FilaSCI filaSCI;
+
+// -----------------------------------------------------------------------
+// Watchdog (REQUISITOS.md §3.11): WDT_T4, timeout COMETA_WATCHDOG_TIMEOUT_S.
+// Se alimenta una sola vez por pasada de loop(), nunca dentro de un
+// módulo de sensor.
+// -----------------------------------------------------------------------
+WDT_T4<WDT1> wdt;
+
+void configurarWatchdog() {
+  WDT_timings_t config = {};
+  config.timeout = COMETA_WATCHDOG_TIMEOUT_S;
+  wdt.begin(config);
+}
 
 // -----------------------------------------------------------------------
 // Reloj y arranque
@@ -103,211 +136,115 @@ void verificarConfiguracion() {
 }
 
 // -----------------------------------------------------------------------
-// GPS — SAM-M8Q (REQUISITOS.md §3.1, §3.9, §4.3, §5)
+// Sensores que no responden (REQUISITOS.md §1.3)
+//
+// Lógica genérica, en un único lugar: cada módulo de sensor solo
+// implementa iniciar()/actualizar()/llenarFila() (REQUISITOS.md §1.2).
+// Si iniciar() falla, el sensor queda ausente (sus celdas quedan vacías
+// y el loop sigue) y se reintenta cada COMETA_SENSOR_REINTENTO_MS.
+// Si ya estaba presente, 5 lecturas fallidas consecutivas de
+// actualizar() lo marcan ausente con la misma regla. reinit cuenta los
+// intentos de iniciar() de todos los sensores.
 // -----------------------------------------------------------------------
 
-// Envía DYN_MODEL_AIRBORNE1g (CFG-NAV5 legacy), relee con
-// getDynamicModel() y registra el resultado en META (REQUISITOS.md §3.1).
-void inicializarGPS() {
-  // TODO
+struct EstadoSensor {
+  const char *nombre;
+  bool (*iniciar)();
+  bool (*actualizar)(uint32_t);
+  void (*llenarFila)(FilaSCI &);
+  bool presente;
+  uint32_t proximoReintentoMs;
+  uint8_t fallosConsecutivos;
+  uint32_t reinit;
+};
+
+// Cuenta total de reintentos de iniciar(), de todos los sensores
+// (columna `reinit` de SCI, REQUISITOS.md §1.3, §4.3).
+uint32_t reinitTotal = 0;
+
+// Todos los sensores menos el ICM-20948, que se actualiza aparte en el
+// tic de 10 ms (ver loop()) porque su FIFO hay que vaciarla a 100 Hz, no
+// a 1 Hz como el resto.
+EstadoSensor sensores[] = {
+    {"SCD30", SensorSCD30::iniciar, SensorSCD30::actualizar,
+     SensorSCD30::llenarFila, false, 0, 0, 0},
+    {"MS8607", SensorMS8607::iniciar, SensorMS8607::actualizar,
+     SensorMS8607::llenarFila, false, 0, 0, 0},
+    {"SHT45", SensorSHT45::iniciar, SensorSHT45::actualizar,
+     SensorSHT45::llenarFila, false, 0, 0, 0},
+    {"LTR390", SensorLTR390::iniciar, SensorLTR390::actualizar,
+     SensorLTR390::llenarFila, false, 0, 0, 0},
+    {"MAX31865_BRAZO", SensorPT1000Brazo::iniciar,
+     SensorPT1000Brazo::actualizar, SensorPT1000Brazo::llenarFila, false, 0,
+     0, 0},
+    {"MAX31865_TUBO", SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
+     SensorPT1000Tubo::llenarFila, false, 0, 0, 0},
+    {"DS18B20", SensorDS18B20::iniciar, SensorDS18B20::actualizar,
+     SensorDS18B20::llenarFila, false, 0, 0, 0},
+    {"PMS5003", SensorPMS5003::iniciar, SensorPMS5003::actualizar,
+     SensorPMS5003::llenarFila, false, 0, 0, 0},
+    {"GEIGER", SensorGeiger::iniciar, SensorGeiger::actualizar,
+     SensorGeiger::llenarFila, false, 0, 0, 0},
+    {"GPS", SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
+     false, 0, 0, 0},
+};
+const size_t COMETA_NUM_SENSORES = sizeof(sensores) / sizeof(sensores[0]);
+
+// ICM-20948: mismo EstadoSensor, tic aparte (100 Hz).
+EstadoSensor estadoICM20948 = {"ICM20948", SensorICM20948::iniciar,
+                                SensorICM20948::actualizar,
+                                SensorICM20948::llenarFila, false, 0, 0, 0};
+
+// Primer intento de iniciar(), al arrancar (REQUISITOS.md §1.3): cuenta
+// en reinit igual que un reintento, para que escribirMETA() pueda listar
+// los sensores ausentes desde el primer momento.
+void inicializarSensorAlArranque(EstadoSensor &s) {
+  s.reinit++;
+  reinitTotal++;
+  s.presente = s.iniciar();
+  if (!s.presente) {
+    s.proximoReintentoMs = COMETA_SENSOR_REINTENTO_MS;
+  }
 }
 
-// Lee posición, altitud, velocidades, sats, pdop, fix y UTC del GPS
-// (REQUISITOS.md §3.9, §4.3).
-void leerGPS() {
-  // TODO
+// Reintenta iniciar() cada COMETA_SENSOR_REINTENTO_MS si el sensor está
+// ausente; si está presente, llama a actualizar() y cuenta fallos
+// consecutivos hasta COMETA_SENSOR_MAX_FALLOS (REQUISITOS.md §1.3).
+void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
+  if (!s.presente) {
+    if ((int32_t)(ahora - s.proximoReintentoMs) < 0) {
+      return;  // todavía no toca reintentar
+    }
+    inicializarSensorAlArranque(s);  // mismo conteo de reinit que un reintento
+    return;
+  }
+
+  if (s.actualizar(ahora)) {
+    s.fallosConsecutivos = 0;
+  } else {
+    s.fallosConsecutivos++;
+    if (s.fallosConsecutivos >= COMETA_SENSOR_MAX_FALLOS) {
+      s.presente = false;
+      s.fallosConsecutivos = 0;
+      s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
+    }
+  }
 }
 
 // -----------------------------------------------------------------------
 // Recuperación del bus I²C (REQUISITOS.md §3.3)
 // -----------------------------------------------------------------------
 
-// Si SDA queda baja: 9 pulsos en SCL y reinicializar. Cuenta las
-// recuperaciones en i2c_recov (REQUISITOS.md §3.3, §4.3). Se llama desde
-// las funciones de lectura I²C (leerGPS(), leerSCD30(), leerMS8607(),
-// leerSHT45(), leerLTR390(), leerICM20948()) cuando detectan un error o
-// timeout, no en cada vuelta de loop().
+// Cuenta las recuperaciones del bus (columna i2c_recov, REQUISITOS.md
+// §4.3). La incrementa recuperarBusI2C() cuando la implemente.
+uint32_t contadorRecuperacionesI2C = 0;
+
+// Si SDA queda baja: 9 pulsos en SCL y reinicializar; incrementar
+// contadorRecuperacionesI2C (REQUISITOS.md §3.3, §4.3). Se llama desde
+// los módulos de sensor I²C (actualizar() de scd30, ms8607, sht45,
+// ltr390, icm20948, gps) cuando detectan un error o timeout, no en cada
+// vuelta de loop().
 void recuperarBusI2C() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// SCD30 (REQUISITOS.md §3.4, §3.5, §4.3, §5)
-// -----------------------------------------------------------------------
-
-// setAutoSelfCalibration(false); calibración manual a valor conocido al
-// aire libre (REQUISITOS.md §3.5).
-void inicializarSCD30() {
-  // TODO
-}
-
-// Lee co2_ppm y t_scd_C (REQUISITOS.md §4.3).
-void leerSCD30() {
-  // TODO
-}
-
-// Envía la presión medida con setAmbientPressure() (rango 700-1400 mbar,
-// fuera de rango se envía el límite) y registra p_inviata_hPa
-// (REQUISITOS.md §3.4).
-void enviarPresionSCD30() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// MS8607 (REQUISITOS.md §4.3, §5)
-// -----------------------------------------------------------------------
-
-void inicializarMS8607() {
-  // TODO
-}
-
-// Lee p_hPa, t_ms8607_C, rh_ms8607 (REQUISITOS.md §4.3).
-void leerMS8607() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// 2x MAX31865 / PT1000 — brazo exterior y tubo (REQUISITOS.md §4.3, §5)
-// -----------------------------------------------------------------------
-
-// Configura RREF=4300.0, RNOMINAL=1000.0 y el modo de cableado
-// (REQUISITOS.md §5).
-void inicializarPT1000() {
-  // TODO
-}
-
-// Lee t_arm_C, t_tubo_C y el fault byte del MAX31865 en err_arm, err_tubo
-// (REQUISITOS.md §4.3).
-void leerPT1000() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// SHT45 (REQUISITOS.md §4.3, §5)
-// -----------------------------------------------------------------------
-
-void inicializarSHT45() {
-  // TODO
-}
-
-// Lee rh_sht, t_sht_C (REQUISITOS.md §4.3).
-void leerSHT45() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// 4x DS18B20 (REQUISITOS.md §4.3, §5)
-// -----------------------------------------------------------------------
-
-// Identifica las cuatro sondas por ROM (caja, pilas, centro, SCD30) y
-// activa resolución 12 bits con setWaitForConversion(false): nunca
-// bloquear el loop 750 ms (REQUISITOS.md §5).
-void inicializarDS18B20() {
-  // TODO
-}
-
-// Lee t_cassa_C, t_pile_C, t_centro_C, t_scd_ds_C sin bloquear
-// (REQUISITOS.md §4.3, §5).
-void leerDS18B20() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// LTR390 (REQUISITOS.md §4.3, §5)
-// -----------------------------------------------------------------------
-
-void inicializarLTR390() {
-  // TODO
-}
-
-// Lee uva_raw, uv_gain, uv_res (conteos crudos, REQUISITOS.md §4.3).
-void leerLTR390() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// ICM-20948 (REQUISITOS.md §4.3, §5, §7)
-// -----------------------------------------------------------------------
-
-// Dirección 0x69 (AD0 alto), ±16 g, 100 Hz (REQUISITOS.md §5).
-void inicializarICM20948() {
-  // TODO
-}
-
-// Lee ax, ay, az, gx, gy, gz, mx, my, mz desde la FIFO interna del
-// ICM-20948 (que muestrea a 100 Hz por su cuenta): vacía todas las
-// muestras presentes en la FIFO en cada pasada del tic de 10 ms, para no
-// perder muestras si el tic de 1000 ms se retrasó (clock stretching del
-// SCD30, GPS, flush de la SD). Cada muestra conserva su propio t_ms,
-// para el buffer circular de la ventana IMU (REQUISITOS.md §4.3, §4.6, §7).
-void leerICM20948() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// PMS5003 (REQUISITOS.md §3.6, §3.7, §4.3, §6)
-// -----------------------------------------------------------------------
-
-// Apaga el PMS5003: primero pone RX/TX de Serial1 en alta impedancia y
-// recién después corta la masa por el MOSFET. El MOSFET (canal N) corta
-// la masa, no la alimentación positiva: con la masa cortada, si TX
-// quedara activo su reposo en alto inyectaría corriente (hasta 8 mA) por
-// los diodos de protección del PMS y lo alimentaría a medias — parece
-// apagado y no lo está, con riesgo de dejarlo en un estado indefinido, y
-// en 4 h de vuelo son ~34 mAh (~4 % del balance de energía).
-void pmsOff() {
-  COMETA_PMS5003_SERIAL.end();
-  pinMode(COMETA_PMS5003_RX_PIN, INPUT);  // alta impedancia: nada de corriente hacia el sensor
-  pinMode(COMETA_PMS5003_TX_PIN, INPUT);
-  digitalWrite(COMETA_PMS5003_MOSFET_PIN, LOW);
-}
-
-// Enciende el PMS5003: primero el MOSFET, después Serial1 (con
-// COMETA_PMS5003_MOSFET_SETTLE_MS de por medio para el asentamiento del
-// regulador). Ese delay() bloquea el loop unos 50 ms: aceptable porque
-// solo ocurre en los cambios de estado de controlarPMS5003(), no en
-// cada vuelta. Las primeras COMETA_PMS_CALENTAMIENTO_S de lecturas tras
-// esto se descartan en leerPMS5003(): el ventilador tarda en
-// estabilizarse (REQUISITOS.md §6).
-void pmsOn() {
-  digitalWrite(COMETA_PMS5003_MOSFET_PIN, HIGH);
-  delay(COMETA_PMS5003_MOSFET_SETTLE_MS);
-  COMETA_PMS5003_SERIAL.begin(COMETA_PMS5003_BAUD);
-}
-
-// Configura COMETA_PMS5003_MOSFET_PIN como salida y llama a pmsOff()
-// para arrancar siempre en un estado conocido.
-void inicializarPMS5003() {
-  // TODO
-}
-
-// Apaga por encima de 5 km; por debajo, en subida, histéresis −15/−12 °C
-// con T exterior (PT1000 brazo); en bajada tras el estallido, se
-// reenciende por debajo de 5 km. Llama a pmsOn()/pmsOff() solo en los
-// cambios de estado. pms_on se registra siempre (REQUISITOS.md §6).
-void controlarPMS5003() {
-  // TODO
-}
-
-// Lee pm1, pm25, pm10, n03, n05, n10; descarta las primeras
-// COMETA_PMS_CALENTAMIENTO_S de cada encendido, el ventilador tarda en
-// estabilizarse (REQUISITOS.md §4.3, §6).
-void leerPMS5003() {
-  // TODO
-}
-
-// -----------------------------------------------------------------------
-// Geiger GGreg20 (REQUISITOS.md §4.3, §5)
-// -----------------------------------------------------------------------
-
-// La ISR solo incrementa un contador (REQUISITOS.md §5).
-void inicializarGeiger() {
-  // TODO
-}
-
-// Guarda los conteos por intervalo: cpi, dt_ms (factor de Fano,
-// REQUISITOS.md §4.3, §5).
-void leerGeiger() {
   // TODO
 }
 
@@ -357,18 +294,8 @@ void guardarVentanaIMU() {
 }
 
 // -----------------------------------------------------------------------
-// Log SCI (REQUISITOS.md §2, §4.2, §4.3)
+// Log SCI y META
 // -----------------------------------------------------------------------
-
-// Los encabezados de SCI_nnn.CSV y de IMU_nnn.CSV (escribirEncabezadoSCI,
-// escribirEncabezadoIMU) están en include/log_format.h, compartido con
-// src/adalogger.
-
-// Compone y escribe una fila de SCI_nnn.CSV a partir de las últimas
-// lecturas (celda vacía = no hubo lectura en esa fila, REQUISITOS.md §4.2).
-void escribirFilaSCI() {
-  // TODO
-}
 
 // flush() cada COMETA_FLUSH_CADA_N_MUESTRAS muestras (REQUISITOS.md §3.2).
 void flushLogSiCorresponde() {
@@ -377,7 +304,10 @@ void flushLogSiCorresponde() {
 
 // Escribe en META_nnn.TXT: hash de Git, frecuencia de reloj, RREF/
 // RNOMINAL, ROM de cada DS18B20, resultado Airborne, direcciones I²C
-// detectadas y datos del disparo IMU si ocurrió (REQUISITOS.md §4.7).
+// detectadas, los sensores ausentes al arranque (sensores[].presente,
+// estadoICM20948.presente, REQUISITOS.md §1.3), la causa del último
+// reinicio si el core la expone (si no, [VERIFICAR], REQUISITOS.md
+// §3.11), y datos del disparo IMU si ocurrió (REQUISITOS.md §4.7).
 void escribirMETA() {
   // TODO
 }
@@ -393,22 +323,19 @@ void setup() {
   abrirArchivoMETA();
 
   verificarConfiguracion();
+  configurarWatchdog();
 
-  inicializarGPS();
-  inicializarSCD30();
-  inicializarMS8607();
-  inicializarPT1000();
-  inicializarSHT45();
-  inicializarDS18B20();
-  inicializarLTR390();
-  inicializarICM20948();
-  inicializarPMS5003();
-  inicializarGeiger();
+  for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
+    inicializarSensorAlArranque(sensores[i]);
+  }
+  inicializarSensorAlArranque(estadoICM20948);
 
   escribirMETA();
 }
 
 void loop() {
+  wdt.feed();  // una sola vez por pasada de loop() (REQUISITOS.md §3.11)
+
   const unsigned long ahora = millis();
   static unsigned long ultimoTickIMU = 0;
   static unsigned long ultimoTickSCI = 0;
@@ -423,7 +350,7 @@ void loop() {
       ultimoTickIMU = ahora;
     }
 
-    leerICM20948();
+    actualizarSensor(estadoICM20948, ahora);
     actualizarBufferIMU();
     verificarDisparoIMU();
     guardarVentanaIMU();
@@ -437,22 +364,31 @@ void loop() {
       ultimoTickSCI = ahora;
     }
 
-    leerGPS();
-    leerMS8607();
-    leerPT1000();
-    leerSHT45();
-    leerSCD30();
-    enviarPresionSCD30();
-    leerDS18B20();
-    leerLTR390();
-    leerPMS5003();
-    leerGeiger();
-    leerBateria();
+    limpiarFilaSCI(filaSCI);
+    filaSCI.t_ms = ahora;
 
-    controlarPMS5003();
+    for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
+      actualizarSensor(sensores[i], ahora);
+      if (sensores[i].presente) {
+        sensores[i].llenarFila(filaSCI);
+      }
+    }
+    if (estadoICM20948.presente) {
+      estadoICM20948.llenarFila(filaSCI);
+    }
+
+    // El PMS5003 no se enciende/apaga con el criterio genérico de
+    // arriba: decide según altitud y T exterior, con histéresis
+    // (REQUISITOS.md §6), no según si "responde".
+    SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_arm_C);
+
+    leerBateria();
     calcularFlagsCalidad();
 
-    escribirFilaSCI();
+    filaSCI.i2c_recov = (float)contadorRecuperacionesI2C;
+    filaSCI.reinit = (float)reinitTotal;
+
+    escribirFilaSCI(archivoSCI, filaSCI);
     flushLogSiCorresponde();
   }
 }
