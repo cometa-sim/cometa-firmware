@@ -27,10 +27,27 @@ FilaL2 filaL2;
 // -----------------------------------------------------------------------
 // Watchdog (REQUISITOS.md §3.11): Adafruit_SleepyDog, timeout
 // COMETA_WATCHDOG_TIMEOUT_S. Se alimenta (Watchdog.reset()) una sola vez
-// por pasada de loop().
+// por pasada de loop(), y entre un paso y el siguiente del arranque.
 // -----------------------------------------------------------------------
+
+// Los periodos del WDT del SAMD21 están cuantizados (potencias de dos de
+// ciclos del reloj de 1,024 kHz): enable() no impone el valor pedido,
+// impone el más cercano que la placa soporta y devuelve ESE. Si no se
+// mira, el timeout real puede no ser el de REQUISITOS.md §3.11 y nadie
+// se entera. Se informa por Serial: esta placa no tiene META.
 void configurarWatchdog() {
-  Watchdog.enable(COMETA_WATCHDOG_TIMEOUT_S * 1000);
+  const int pedidoMs = COMETA_WATCHDOG_TIMEOUT_S * 1000;
+  const int realMs = Watchdog.enable(pedidoMs);
+
+  Serial.print("WATCHDOG: pedido ");
+  Serial.print(pedidoMs);
+  Serial.print(" ms, real ");
+  Serial.print(realMs);
+  Serial.println(" ms");
+
+  if (realMs != pedidoMs) {
+    Serial.println("WATCHDOG: el periodo real NO es el de REQUISITOS.md §3.11");
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -67,8 +84,6 @@ void reportarConfigIncompleta(const char *nombre) {
 // fijaron a valores decididos (REQUISITOS.md §2.1): solo queda el
 // timeout I²C.
 void verificarConfiguracion() {
-  Serial.begin(115200);
-
   if (COMETA_I2C_TIMEOUT_MS == COMETA_MS_VERIFICAR) {
     reportarConfigIncompleta("I2C_TIMEOUT_MS");
   }
@@ -86,6 +101,9 @@ void inicializarGPS() {
 
 // Lee posición, altitud, vz_ms, sats, fix y UTC del GPS
 // (REQUISITOS.md §3.9, §4.5). Vuelca en f, solo si hay un fix nuevo.
+// utc se escribe SOLO con copiarUTC(f.utc, cadena) de log_format.h,
+// nunca con strcpy() directo: es un char[21] justo y un desborde pisaría
+// lat y lon (REQUISITOS.md §4.2).
 void leerGPS(FilaL2 &f) {
   (void)f;
   // TODO
@@ -131,19 +149,27 @@ void flushLogSiCorresponde() {
 // -----------------------------------------------------------------------
 
 void setup() {
-  verificarConfiguracion();
+  // Serial primero, para que configurarWatchdog() pueda informar el
+  // periodo real. Sin `while (!Serial)`: esperando al host USB la placa
+  // no arrancaría nunca en vuelo.
+  Serial.begin(115200);
+
+  // El watchdog se arma lo primero de todo, antes de tocar nada: así
+  // cubre también el arranque. A cambio hay que alimentarlo DESPUÉS DE
+  // CADA PASO (REQUISITOS.md §3.11): ningún paso suelto puede pasarse de
+  // COMETA_WATCHDOG_TIMEOUT_S, pero montar la SD, buscar el primer nnn
+  // libre y configurar el GPS sí suman más sin que nada esté colgado, y
+  // la placa se reiniciaría antes de llegar a loop(), una y otra vez.
   configurarWatchdog();
 
-  // El watchdog ya está armado acá: hay que alimentarlo entre un paso
-  // del arranque y el siguiente (REQUISITOS.md §3.11). Montar la SD,
-  // buscar el primer nnn libre y configurar el GPS pueden sumar más de
-  // COMETA_WATCHDOG_TIMEOUT_S sin que nada esté colgado, y la placa se
-  // reiniciaría antes de llegar a loop(), una y otra vez.
+  verificarConfiguracion();
+  Watchdog.reset();
   inicializarSD();
   Watchdog.reset();
   abrirArchivoL2();
   Watchdog.reset();
   inicializarGPS();
+  Watchdog.reset();
 }
 
 void loop() {

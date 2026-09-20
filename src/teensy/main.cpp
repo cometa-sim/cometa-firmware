@@ -162,9 +162,15 @@ struct EstadoSensor {
 // (columna `reinit` de SCI, REQUISITOS.md §1.3, §4.3).
 uint32_t reinitTotal = 0;
 
-// Todos los sensores menos el ICM-20948, que se actualiza aparte en el
-// tic de 10 ms (ver loop()) porque su FIFO hay que vaciarla a 100 Hz, no
-// a 1 Hz como el resto.
+// Sensores gobernados por la máquina de presencia/ausencia. Quedan
+// fuera dos, por motivos distintos (REQUISITOS.md §1.3):
+//   - ICM-20948: mismo EstadoSensor, pero se actualiza en el tic de
+//     10 ms (ver loop()) porque su FIFO hay que vaciarla a 100 Hz.
+//   - Geiger: no tiene con qué "no responder". Es un pin con una
+//     interrupción, no un dispositivo de bus: iniciar() no puede fallar
+//     y actualizar() no puede devolver false. Meterlo acá haría que un
+//     `false` accidental lo marcara ausente y dejara de leerse el
+//     contador, perdiendo cuentas en silencio. Se llama directo.
 EstadoSensor sensores[] = {
     {"SCD30", SensorSCD30::iniciar, SensorSCD30::actualizar,
      SensorSCD30::llenarFila, false, 0, 0, 0},
@@ -183,8 +189,6 @@ EstadoSensor sensores[] = {
      SensorDS18B20::llenarFila, false, 0, 0, 0},
     {"PMS5003", SensorPMS5003::iniciar, SensorPMS5003::actualizar,
      SensorPMS5003::llenarFila, false, 0, 0, 0},
-    {"GEIGER", SensorGeiger::iniciar, SensorGeiger::actualizar,
-     SensorGeiger::llenarFila, false, 0, 0, 0},
     {"GPS", SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
      false, 0, 0, 0},
 };
@@ -256,8 +260,11 @@ void recuperarBusI2C() {
 // Batería (REQUISITOS.md §3.10, §4.3)
 // -----------------------------------------------------------------------
 
-// Lee v_batt por ADC (REQUISITOS.md §3.10).
-void leerBateria() {
+// Lee v_batt por ADC (REQUISITOS.md §3.10). Vuelca en f, solo si hay un
+// dato nuevo: como los módulos de sensor, recibe la fila por referencia
+// y toca solo sus propios campos (REQUISITOS.md §1.2).
+void leerBateria(FilaSCI &f) {
+  (void)f;
   // TODO
 }
 
@@ -265,9 +272,13 @@ void leerBateria() {
 // Flags de calidad (REQUISITOS.md §4.4)
 // -----------------------------------------------------------------------
 
-// Calcula q_pms, q_rh, q_arm, q_tubo, q_p: datos fuera de especificación
-// se marcan, no se descartan (REQUISITOS.md §3.7, §4.4).
-void calcularFlagsCalidad() {
+// Calcula q_pms, q_rh, q_arm, q_tubo, q_p a partir de los valores ya
+// cargados en f: datos fuera de especificación se marcan, no se
+// descartan (REQUISITOS.md §3.7, §4.4). Se llama al final del tic, con
+// la fila ya completa, y recibe la fila por referencia como todo lo que
+// escribe datos (REQUISITOS.md §1.2).
+void calcularFlagsCalidad(FilaSCI &f) {
+  (void)f;
   // TODO
 }
 
@@ -288,13 +299,24 @@ void verificarDisparoIMU() {
   // TODO
 }
 
+// Hay una sola ventana, sin rearmado (REQUISITOS.md §7): una vez
+// guardada, esta función no vuelve a hacer nada. Sin esta guarda se
+// llamaría en cada tic de 10 ms y reescribiría el encabezado 100 veces
+// por segundo.
+bool ventanaIMUGuardada = false;
+
 // Recién en el disparo (no antes): crea IMU_nnn.CSV, escribe su
 // encabezado y vuelca la ventana (20 s antes, 90 s después) desde el
 // buffer circular; registra criterio, t_ms, UTC y altitud en META
 // (REQUISITOS.md §4.1, §4.6, §4.7, §7).
 void guardarVentanaIMU() {
-  // TODO: crear el archivo con el primer nnn libre.
+  if (ventanaIMUGuardada) {
+    return;
+  }
+  // TODO: salir también mientras no haya disparo (verificarDisparoIMU()),
+  // y crear el archivo con el primer nnn libre.
   escribirEncabezadoIMU(archivoIMU);
+  ventanaIMUGuardada = true;
 }
 
 // -----------------------------------------------------------------------
@@ -308,12 +330,18 @@ void flushLogSiCorresponde() {
 
 // Escribe en META_nnn.TXT: hash de Git, frecuencia de reloj, RREF/
 // RNOMINAL, ROM de cada DS18B20, resultado Airborne, direcciones I²C
-// detectadas, los sensores ausentes al arranque (sensores[].presente,
-// estadoICM20948.presente, REQUISITOS.md §1.3), la causa del último
-// reinicio si el core la expone (si no, [VERIFICAR], REQUISITOS.md
-// §3.11), y datos del disparo IMU si ocurrió (REQUISITOS.md §4.7).
+// detectadas, la causa del último reinicio si el core la expone (si no,
+// [VERIFICAR], REQUISITOS.md §3.11), y datos del disparo IMU si ocurrió
+// (REQUISITOS.md §4.7).
+//
+// Para cada sensor, una línea con su nombre, si está presente y su
+// contador propio de intentos de iniciar() (EstadoSensor.reinit). La
+// columna `reinit` de SCI es la suma de todos: sirve para ver que algo
+// se está reiniciando, no cuál. El desglose por sensor es el que
+// contesta esa pregunta al analizar el vuelo (REQUISITOS.md §1.3, §4.7).
 void escribirMETA() {
-  // TODO
+  // TODO: recorrer sensores[] y estadoICM20948 escribiendo nombre,
+  // presente y reinit de cada uno.
 }
 
 // -----------------------------------------------------------------------
@@ -321,30 +349,43 @@ void escribirMETA() {
 // -----------------------------------------------------------------------
 
 void setup() {
-  configurarRelojCPU();
-  inicializarSD();
-  abrirArchivoSCI();
-  abrirArchivoMETA();
-
-  verificarConfiguracion();
+  // El watchdog se arma lo primero de todo, antes de tocar nada: así
+  // cubre también el arranque, que es donde más fácil es colgarse (una
+  // SD que no monta, un sensor que estira el clock del I²C para
+  // siempre). A cambio hay que alimentarlo DESPUÉS DE CADA PASO del
+  // arranque (REQUISITOS.md §3.11): ningún paso suelto puede pasarse de
+  // COMETA_WATCHDOG_TIMEOUT_S, pero la suma de todos sí — montar la SD,
+  // buscar el primer nnn libre y once iniciar() con sus timeouts se
+  // pasan de 8 s sin que nada esté roto. Sin estos feed la placa se
+  // reiniciaría antes de llegar a loop(), y otra vez, y otra: ciclo de
+  // reinicios infinito y ni una fila de log.
   configurarWatchdog();
 
-  // El watchdog ya está armado acá: hay que alimentarlo entre un
-  // iniciar() y el siguiente (REQUISITOS.md §3.11). Si no, un arranque
-  // lento pero sano — varios sensores I²C ausentes, cada uno esperando
-  // su timeout — supera los COMETA_WATCHDOG_TIMEOUT_S y la placa se
-  // reinicia antes de llegar a loop(), una y otra vez: ciclo de
-  // reinicios infinito y ni una fila de log. Alimentar acá no rompe la
-  // regla de "una sola vez por pasada de loop()": un iniciar() que se
-  // cuelga de verdad (más de 8 s en una sola llamada) igual reinicia.
-  // millis() se relee por sensor, no una vez antes del bucle: el arranque
-  // puede durar varios segundos si hay varios ausentes, y cada uno tiene
-  // que esperar 30 s desde su propio intento.
+  configurarRelojCPU();
+  wdt.feed();
+  inicializarSD();
+  wdt.feed();
+  abrirArchivoSCI();
+  wdt.feed();
+  abrirArchivoMETA();
+  wdt.feed();
+
+  verificarConfiguracion();
+  wdt.feed();
+
+  // millis() se relee por sensor, no una vez antes del bucle: el
+  // arranque puede durar varios segundos si hay varios ausentes, y cada
+  // uno tiene que esperar 30 s desde su propio intento.
   for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
     intentarIniciarSensor(sensores[i], millis());
     wdt.feed();
   }
   intentarIniciarSensor(estadoICM20948, millis());
+  wdt.feed();
+
+  // El Geiger no pasa por la máquina de presencia/ausencia: es un pin
+  // con una interrupción, iniciar() no puede fallar (REQUISITOS.md §1.3).
+  SensorGeiger::iniciar();
   wdt.feed();
 
   escribirMETA();
@@ -381,6 +422,13 @@ void loop() {
       ultimoTickSCI = ahora;
     }
 
+    // loop_ms mide esta pasada del tic de 1000 ms, de punta a punta
+    // (REQUISITOS.md §4.3): cuánto tardaron todos los módulos más la
+    // escritura en la SD. Es el número que dice si el presupuesto de
+    // bloqueo de §1.2 se está respetando en vuelo; si se acerca a 1000
+    // el tic se empieza a atrasar y hay que mirar qué módulo bloquea.
+    const uint32_t inicioPasada = millis();
+
     limpiarFilaSCI(filaSCI);
     filaSCI.t_ms = ahora;
 
@@ -394,16 +442,26 @@ void loop() {
       estadoICM20948.llenarFila(filaSCI);
     }
 
+    // El Geiger va directo, sin máquina de presencia/ausencia: leer y
+    // poner a cero el contador de la ISR no puede fallar
+    // (REQUISITOS.md §1.3, §5).
+    SensorGeiger::actualizar(ahora);
+    SensorGeiger::llenarFila(filaSCI);
+
     // El PMS5003 no se enciende/apaga con el criterio genérico de
     // arriba: decide según altitud y T exterior, con histéresis
     // (REQUISITOS.md §6), no según si "responde".
     SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_arm_C);
 
-    leerBateria();
-    calcularFlagsCalidad();
+    leerBateria(filaSCI);
+    calcularFlagsCalidad(filaSCI);
 
     filaSCI.i2c_recov = (float)contadorRecuperacionesI2C;
     filaSCI.reinit = (float)reinitTotal;
+
+    // loop_ms se cierra justo antes de escribir la fila: incluye todo el
+    // trabajo de la pasada menos el escribirFilaSCI() que lo registra.
+    filaSCI.loop_ms = (float)(millis() - inicioPasada);
 
     escribirFilaSCI(archivoSCI, filaSCI);
     flushLogSiCorresponde();

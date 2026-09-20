@@ -1,9 +1,16 @@
 // geiger.cpp
 //
-// El contador volatile y la ISR están implementados de verdad: son la
-// única parte del hardware que no puede esperar (si no hay ISR
-// conectada, se pierden pulsos desde el primer instante). El resto
-// (iniciar/actualizar/llenarFila) es impalcatura: cuerpos vacíos.
+// CÓDIGO DE ARQUITECTURA — NO TOCAR (REQUISITOS.md §1.2): el contador
+// volatile y la ISR de abajo no son "el sensor", son la decisión de
+// diseño de cómo se cuentan los pulsos, y están implementados de verdad.
+// Si no hay ISR conectada se pierden pulsos desde el primer instante, y
+// si el contador deja de ser volatile el compilador puede cachearlo y
+// las cuentas salen mal de una forma que no se ve hasta analizar el
+// vuelo. El resto (iniciar/actualizar/llenarFila) sí es impalcatura:
+// cuerpos vacíos a completar.
+//
+// Este módulo no pasa por la máquina de presencia/ausencia
+// (REQUISITOS.md §1.3): main.cpp lo llama directo.
 //
 // TODO implementar (REQUISITOS.md §4.3, §5):
 //   - iniciar(): pinMode(COMETA_GEIGER_PIN, ...) y

@@ -22,7 +22,8 @@
 //          (dt_ms; una duración real de 0 ms no ocurre en la práctica,
 //          es el mismo criterio de centinela evidente que se usa en
 //          config_teensy.h/config_adalogger.h).
-//   UTC  — char[21] con la hora ISO 8601; cadena vacía = celda vacía.
+//   UTC  — char[COMETA_UTC_LARGO] con la hora ISO 8601; cadena vacía =
+//          celda vacía. Se escribe SOLO con copiarUTC() (ver abajo).
 //   LL   — double (lat, lon); NAN = celda vacía.
 //   F    — float; NAN = celda vacía.
 // NAN = celda vacía es la regla general (REQUISITOS.md §4.2); utc y
@@ -34,6 +35,26 @@
 #include <Arduino.h>
 #include <SD.h>
 #include <math.h>
+#include <string.h>
+
+// Largo del campo utc, contando el '\0': "2026-10-15T13:02:05Z" son 20
+// caracteres (REQUISITOS.md §4.2).
+#define COMETA_UTC_LARGO 21
+
+// Copia una cadena UTC en el campo utc de una fila. Es la ÚNICA forma
+// permitida de escribir ese campo (REQUISITOS.md §4.2): utc es un
+// char[21] pelado, y un strcpy() de una cadena más larga —un formato con
+// milisegundos, una trama NMEA mal parseada— pisaría los campos que
+// siguen en la struct. Acá el largo está acotado y el '\0' garantizado
+// siempre; si la cadena no entra, se trunca en vez de desbordar.
+inline void copiarUTC(char destino[COMETA_UTC_LARGO], const char *origen) {
+  if (origen == nullptr) {
+    destino[0] = '\0';
+    return;
+  }
+  strncpy(destino, origen, COMETA_UTC_LARGO - 1);
+  destino[COMETA_UTC_LARGO - 1] = '\0';
+}
 
 // -----------------------------------------------------------------------
 // Listas de campos — la única fuente de verdad de cada log.
@@ -139,7 +160,7 @@
 // Declaración del campo dentro de la struct.
 #define COMETA_CAMPO_DECLARA_U32(nombre)  uint32_t nombre;
 #define COMETA_CAMPO_DECLARA_U32N(nombre) uint32_t nombre;
-#define COMETA_CAMPO_DECLARA_UTC(nombre)  char nombre[21];
+#define COMETA_CAMPO_DECLARA_UTC(nombre)  char nombre[COMETA_UTC_LARGO];
 #define COMETA_CAMPO_DECLARA_LL(nombre)   double nombre;
 #define COMETA_CAMPO_DECLARA_F(nombre)    float nombre;
 #define COMETA_CAMPO_DECLARA(nombre, tipo, decimales) \

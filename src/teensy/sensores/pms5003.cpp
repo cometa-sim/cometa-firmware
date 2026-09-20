@@ -1,10 +1,12 @@
 // pms5003.cpp
 //
-// apagar()/encender() están implementadas de verdad (no son "lógica de
-// sensor": son la secuencia de pines que evita la fuga de corriente por
-// TX descrita abajo). iniciar()/actualizar()/llenarFila()/
-// controlarEncendido() son impalcatura: cuerpos vacíos, sin llamadas a
-// ninguna librería de parseo del PMS5003.
+// CÓDIGO DE ARQUITECTURA — NO TOCAR (REQUISITOS.md §1.2): apagar() y
+// encender() están implementadas de verdad. No son "lógica de sensor":
+// son la secuencia exacta de pines que evita la fuga de corriente por TX
+// descrita abajo (REQUISITOS.md §6), y el orden de las líneas importa.
+// iniciar()/actualizar()/llenarFila()/controlarEncendido() sí son
+// impalcatura: cuerpos vacíos, sin llamadas a ninguna librería de
+// parseo del PMS5003.
 //
 // TODO implementar (REQUISITOS.md §3.6, §3.7, §4.3, §6):
 //   - iniciar(): configurar COMETA_PMS5003_MOSFET_PIN como OUTPUT y
