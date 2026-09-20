@@ -78,7 +78,11 @@
 #define COMETA_MS8607_I2C_ADDR_HUMEDAD      0x40
 
 // -----------------------------------------------------------------------
-// §5 — SHT45 (I²C 0x44, en el brazo exterior)
+// §5 — SHT45 (I²C 0x44, en el brazo exterior). Adafruit_SHT4x no recibe
+// la dirección por parámetro: la tiene fija en SHT4x_DEFAULT_ADDR, que
+// vale lo mismo. La constante queda como documentación del bus (es la
+// que se compara con el escaneo I²C que va a META, §4.7), no como
+// parámetro de sensores/sht45.cpp.
 // -----------------------------------------------------------------------
 #define COMETA_SHT45_I2C_ADDR 0x44
 
@@ -184,5 +188,25 @@
 #define COMETA_SCI_EXT  ".CSV"
 #define COMETA_IMU_EXT  ".CSV"
 #define COMETA_META_EXT ".TXT"
+
+// -----------------------------------------------------------------------
+// §1.3 — Sensores que no responden: reintento de iniciar() y umbral de
+// lecturas fallidas consecutivas antes de marcar el sensor ausente
+// -----------------------------------------------------------------------
+#define COMETA_SENSOR_REINTENTO_MS 30000UL
+#define COMETA_SENSOR_MAX_FALLOS   5
+
+// -----------------------------------------------------------------------
+// §1.2 — Presupuesto de bloqueo de un módulo de sensor. Una llamada a
+// actualizar() en el tic de 1000 ms no puede bloquear más que esto; una
+// conversión más larga (DS18B20: 750 ms a 12 bits) se parte en dos
+// pasadas, arranque y recogida. En el tic de 10 ms no se bloquea nada.
+// -----------------------------------------------------------------------
+#define COMETA_BLOQUEO_MAX_MS 20UL
+
+// -----------------------------------------------------------------------
+// §3.11 — Watchdog (WDT_T4, timeout en segundos)
+// -----------------------------------------------------------------------
+#define COMETA_WATCHDOG_TIMEOUT_S 8
 
 #endif  // COMETA_CONFIG_TEENSY_H

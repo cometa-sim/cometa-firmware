@@ -26,6 +26,53 @@ Los valores marcados **[VERIFICAR]** no están confirmados: no se inventan, se m
 
 Si un tic se atrasa más de un período (por ejemplo, por el `flush()` de la SD o el clock stretching del SCD30 en el tic de 1000 ms), se realinea a `millis()` actual en vez de intentar recuperar el atraso disparando varias veces seguidas.
 
+### 1.2 Módulos de sensor
+
+Cada sensor del Teensy es un módulo en `src/teensy/sensores/` (un `.h`/`.cpp` por sensor; el MAX31865 es un solo archivo con dos instancias, brazo y tubo). Todos comparten la misma interfaz, un espacio de nombres por sensor con tres funciones:
+
+```cpp
+namespace SensorXxx {
+  bool iniciar();                    // true si el sensor responde
+  bool actualizar(uint32_t ahora);   // no bloqueante; true si la lectura de esta pasada fue válida
+  void llenarFila(FilaSCI &f);       // toca solo sus propios campos, solo si hay un dato nuevo
+}
+```
+
+`actualizar()` devuelve `bool` (no `void`): es la única forma de que el gestor de sensores (§1.3) sepa si una lectura falló, para contar los 5 fallos consecutivos.
+
+`FilaSCI` (y `FilaIMU`, `FilaL2` para el Teensy y el Adalogger) son structs generadas en `include/log_format.h` a partir de una lista única de campos (nombre, tipo, decimales): de esa lista se generan también el encabezado CSV, la escritura de la fila y el número de columnas, para no repetir los nombres de columna en tres lugares distintos.
+
+`sht45.h`/`sht45.cpp` es el módulo de ejemplo: es el único sensor completamente implementado, y el resto se escribe copiando esa forma. Los demás módulos son solo la declaración de la interfaz y cuerpos vacíos (`// TODO`, sin llamar a ninguna librería), con un comentario que remite a la sección de este documento que describe ese sensor.
+
+**Código de arquitectura: no se toca.** Dos módulos traen, además de los cuerpos vacíos, código ya escrito que no es "lógica de sensor" sino una decisión de diseño de la que depende el vuelo. Está marcado en el archivo y no se modifica al completar el módulo:
+
+- `geiger.cpp`: el contador `volatile` y la ISR (§5). Sin ISR conectada se pierden pulsos desde el primer instante, y sin `volatile` el compilador puede cachear el contador.
+- `pms5003.cpp`: `apagar()` y `encender()`, la secuencia exacta de pines que evita la fuga de corriente por TX (§6). El orden de las líneas importa.
+
+**Presupuesto de bloqueo.** `actualizar()` es "no bloqueante" con un límite concreto, no como principio vago:
+
+- En el tic de **1000 ms**, una llamada a un módulo puede bloquear como mucho `COMETA_BLOQUEO_MAX_MS` = **20 ms** (`config_teensy.h`).
+- En el tic de **10 ms** no se bloquea nada: es el del ICM-20948 y el buffer de la ventana IMU.
+- Una espera más larga que esos 20 ms se parte en **arranque + recogida**: una pasada lanza la medición y se va, otra posterior la recoge cuando ya está lista. El caso es el **DS18B20**, cuya conversión a 12 bits tarda 750 ms: con `setWaitForConversion(false)` entrega un dato nuevo cada dos tics, y las filas del medio llevan la celda vacía (§4.2), que es lo correcto — no se repite el último valor.
+- El **SHT45** bloquea 10 ms (el `delay()` interno de `getEvent()` con `SHT4X_HIGH_PRECISION` y sin calefactor): entra en el presupuesto, por eso no se parte en dos pasadas. Con el calefactor encendido ese `delay()` pasa a 110 o 1100 ms y dejaría de ser conforme.
+
+Estos 20 ms no descuadran la ventana IMU: el ICM-20948 se lee de su **FIFO**, no del registro instantáneo. La FIFO sigue llenándose a 100 Hz mientras el tic de 1000 ms trabaja, y el tic de 10 ms siguiente la vacía entera. Un retraso de 20 ms significa dos muestras que se leen juntas un poco después, no dos muestras perdidas. Lo que sí las perdería es bloquear **dentro** del tic de 10 ms, o dejar que la FIFO se desborde.
+
+### 1.3 Sensores que no responden
+
+Si `iniciar()` falla, el sensor queda **ausente**: sus celdas quedan vacías (§4.2) y el loop sigue con el resto. Se reintenta `iniciar()` cada 30 s (`COMETA_SENSOR_REINTENTO_MS`). Si el sensor ya estaba presente, 5 lecturas fallidas consecutivas de `actualizar()` (`COMETA_SENSOR_MAX_FALLOS`) lo marcan ausente con la misma regla de reintento.
+
+Esta lógica vive en un único lugar (main.cpp, o un gestor común), no en cada módulo: el estudiante que escribe un sensor solo implementa `iniciar()`/`actualizar()`/`llenarFila()`.
+
+El reintento se programa **relativo al instante del intento** (`ahora + COMETA_SENSOR_REINTENTO_MS`), no como un valor absoluto: si no, a partir del primer reintento la comparación queda siempre cierta y el sensor se reintenta en cada tic en vez de cada 30 s.
+
+Dos sensores quedan **fuera** de esta máquina:
+
+- El **ICM-20948**, porque se actualiza en el tic de 10 ms y no en el de 1000 ms (§1.1). Usa la misma lógica de ausencia, pero desde el tic rápido.
+- El **Geiger**, porque no tiene con qué "no responder": es un pin con una interrupción, no un dispositivo de bus. `iniciar()` no puede fallar y `actualizar()` no puede devolver `false`. Si estuviera en la máquina, un `false` accidental lo marcaría ausente y dejaría de leerse el contador, perdiendo cuentas en silencio. `main.cpp` lo llama directo.
+
+Los intentos de `iniciar()` (el primero al arrancar y cada reintento) se cuentan en la columna `reinit` de `SCI` (§4.3), que es la **suma de todos los sensores**: dice que algo se está reiniciando, no cuál. El desglose por sensor, junto con los ausentes al arranque, va en `META` (§4.7).
+
 ## 2. Las dos cadenas son independientes
 
 | | Teensy 4.1 (nivel 3) | Feather M0 Adalogger (nivel 2) |
@@ -61,6 +108,17 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 
 El termostato del pad calefactor **no** forma parte de la configuración de vuelo: no se implementa ahora.
 
+### 3.11 Watchdog
+
+- **Teensy**: `WDT_T4`, timeout 8 s (`COMETA_WATCHDOG_TIMEOUT_S`).
+- **Adalogger**: `Adafruit_SleepyDog`, timeout 8 s (`COMETA_WATCHDOG_TIMEOUT_S`).
+- Se arma **al principio de `setup()`**, antes de tocar nada, en las dos placas: así cubre también el arranque, que es donde más fácil es colgarse (una SD que no monta, un sensor que estira el clock del I²C para siempre).
+- **En `setup()` se alimenta después de cada paso del arranque**: cada `iniciar()`, montar la SD, abrir el archivo, configurar el GPS. La regla es que **ningún paso suelto puede pasarse del timeout**, pero la suma de todos sí puede: once `iniciar()` con sus timeouts de I²C más el montaje de la SD se pasan de 8 s sin que nada esté roto. Sin estos *feed* la placa se reiniciaría antes de llegar a `loop()`, y otra vez, y otra: ciclo de reinicios infinito y ni una fila de log. Una sola llamada que se cuelgue de verdad sí reinicia, que es lo que se quiere.
+- **En `loop()` se alimenta una sola vez por pasada**, al principio, y nunca dentro de un módulo de sensor: si un módulo se cuelga, el watchdog tiene que poder reiniciar la placa.
+- `WDT_T4` no está en el registro de PlatformIO ni tiene releases de Git. Está **copiada en `lib/WDT_T4/`** (commit `1910b57d24468cd3419959118a2e1e6192f5e7fa`, MIT) en vez de bajarse por URL: así la compilación no depende de que GitHub responda ni de que el repositorio siga existiendo dentro de un año. El resto de las librerías sigue con versión fija en `lib_deps` (§1).
+- El Adalogger **comprueba el periodo que devuelve `Watchdog.enable()`** y lo informa por Serial al arrancar: en el SAMD21 los periodos están cuantizados y la placa puede imponer uno distinto del pedido. Esta placa no tiene `META`, por eso va por Serial.
+- Causa del último reinicio: se registra en `META` si el core la expone; si no, **[VERIFICAR]**.
+
 ## 4. Formato del log
 
 ### 4.1 Archivos
@@ -80,8 +138,9 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 - Separador **coma**, decimal **punto**, una fila de encabezado con los nombres de columna.
 - **Celda vacía = no hubo lectura en esa fila.** No repetir el último valor (el SCD30, por ejemplo, actualiza cada 2 s).
 - `t_ms`: milisegundos desde el arranque, siempre presente.
-- `utc`: ISO 8601 (`2026-10-15T13:02:05Z`), vacío hasta tener fix.
+- `utc`: ISO 8601 (`2026-10-15T13:02:05Z`), vacío hasta tener fix. Se escribe **solo con `copiarUTC(f.utc, cadena)`** de `log_format.h`, nunca con `strcpy()` ni `sprintf()` directo sobre el campo: son 20 caracteres más el `\0`, justos, y una cadena más larga (un formato con milisegundos, una trama mal parseada) pisaría `lat` y `lon`, que están pegados en la struct — el log saldría con posiciones absurdas y sin ningún error visible. `copiarUTC()` acota el largo, garantiza el `\0` y trunca en vez de desbordar.
 - `vz_ms` positiva hacia arriba.
+- **Tipos de campo** (`include/log_format.h`): `t_ms` y `dt_ms` son `uint32_t`; `utc` es una cadena de hasta 20 caracteres; `lat` y `lon` son `double`; el resto de las columnas son `float`. **NAN = celda vacía** es la regla general para los campos numéricos; `utc` vacío es el mismo caso pero con cadena vacía en vez de NAN. `dt_ms`, al ser entero, usa 0 como su propio "vacío" (una duración real de 0 ms no ocurre en la práctica).
 
 ### 4.3 Columnas de `SCI`
 
@@ -99,7 +158,13 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 | PMS5003 | `pms_on`, `pm1`, `pm25`, `pm10`, `n03`, `n05`, `n10` |
 | Geiger | `cpi` (conteos en el intervalo), `dt_ms` (duración real del intervalo) |
 | Calidad | `q_pms`, `q_rh`, `q_arm`, `q_tubo`, `q_p` |
-| Sistema | `v_batt`, `i2c_recov`, `loop_ms` |
+| Sistema | `v_batt`, `i2c_recov`, `reinit`, `loop_ms` |
+
+`reinit` (después de `i2c_recov`): cuenta los intentos de `iniciar()` de todos los sensores, el primero al arrancar y cada reintento (§1.3). Es la suma; el desglose por sensor va en `META` (§4.7).
+
+`loop_ms`: duración real de esa pasada del tic de 1000 ms, medida de punta a punta — todos los módulos más el armado de la fila, cerrada justo antes de escribirla. Es el número que dice si el presupuesto de bloqueo de §1.2 se está respetando en vuelo: si se acerca a 1000, el tic se empieza a atrasar y hay que mirar qué módulo bloquea de más.
+
+57 columnas en total (`include/log_format.h`, `COMETA_SCI_NUM_COLUMNAS`).
 
 ### 4.4 Flags de calidad (0 = en especificación, 1 = fuera)
 
@@ -120,7 +185,9 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 
 ### 4.7 Contenido de `META`
 
-Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada DS18B20 con su posición, resultado de la configuración Airborne, dirección detectada de cada dispositivo I²C, y (si ocurre) el disparo de la ventana IMU: cuál criterio, `t_ms`, UTC, altitud.
+Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada DS18B20 con su posición, resultado de la configuración Airborne, dirección detectada de cada dispositivo I²C, la causa del último reinicio (§3.11), y (si ocurre) el disparo de la ventana IMU: cuál criterio, `t_ms`, UTC, altitud.
+
+Además, **una línea por sensor** con su nombre, si estaba presente al arranque y su contador propio de intentos de `iniciar()` (§1.3). La columna `reinit` de `SCI` dice que algo se reinició; este desglose dice cuál, que es la pregunta que se hace al analizar el vuelo.
 
 ## 5. Sensores y constantes
 
@@ -151,7 +218,14 @@ Con `430` / `100` el sensor devuelve números creíbles y equivocados.
 
 **DS18B20.** Identificar las cuatro por ROM antes del montaje (caja, pilas, centro del volumen, SCD30). Resolución 12 bits con `setWaitForConversion(false)`: nunca bloquear el loop 750 ms.
 
-**Geiger.** La ISR solo incrementa un contador. Guardar los conteos **por intervalo** (`cpi`, `dt_ms`): sirven para el factor de Fano.
+**Geiger.** La ISR solo incrementa un contador. Guardar los conteos **por intervalo** (`cpi`, `dt_ms`): sirven para el factor de Fano. La lectura y el azaramiento del contador van en un único bloque con interrupciones deshabilitadas, para no perder ni duplicar un pulso que llegue justo en el medio:
+
+```cpp
+noInterrupts();
+uint32_t cuenta = contadorPulsos;
+contadorPulsos = 0;
+interrupts();
+```
 
 ## 6. Control del PMS5003
 

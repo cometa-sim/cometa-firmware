@@ -11,12 +11,23 @@ y 8). Si algo de este repositorio contradice un ejemplo de librería, manda
 
 ## Estado del proyecto
 
-Este repositorio contiene por ahora solo la **impalcatura** del firmware:
-estructura del proyecto, configuración de PlatformIO, constantes y las
-firmas de las funciones de cada sensor. La lógica de cada sensor todavía
-**no** está implementada (son funciones vacías con un comentario en
-español que indica el requisito de `REQUISITOS.md` al que corresponde). La
-única lógica real ya escrita es la de las cabeceras CSV (`§4`).
+El contrato del firmware ya está cerrado: formato de log, interfaz de los
+módulos de sensor, presupuesto de bloqueo, manejo de sensores ausentes y
+watchdog (`REQUISITOS.md` §1.1–§1.3, §3.11). De los sensores, solo
+**SHT45** está implementado de verdad, como módulo de ejemplo; el resto
+de `src/teensy/sensores/` son cuerpos vacíos con un comentario en
+español que indica el requisito de `REQUISITOS.md` al que corresponde,
+listos para que cada estudiante complete el suyo.
+
+Dos cosas antes de escribir un módulo:
+
+- **El presupuesto de bloqueo** (§1.2): en el tic de 1000 ms una llamada
+  puede bloquear como mucho `COMETA_BLOQUEO_MAX_MS` = 20 ms; en el de
+  10 ms, nada. Una espera más larga se parte en arranque y recogida
+  (el caso del DS18B20, 750 ms de conversión).
+- **El código marcado "no tocar"** en `geiger.cpp` y `pms5003.cpp`
+  (§1.2): la ISR del contador y la secuencia de apagado del PMS5003 ya
+  están escritas y no son parte del ejercicio.
 
 ## Estructura del proyecto
 
@@ -26,12 +37,19 @@ ni masa; la única relación entre los dos logs es el UTC del GPS.
 
 ```
 include/
-  config_teensy.h      constantes de la cadena científica (Teensy 4.1)
-  config_adalogger.h   constantes de la cadena de respaldo (Feather M0)
+  config_teensy.h       constantes de la cadena científica (Teensy 4.1)
+  config_adalogger.h    constantes de la cadena de respaldo (Feather M0)
+  log_format.h           FilaSCI/FilaIMU/FilaL2, encabezados y filas CSV,
+                          generados desde una lista única de campos, y
+                          copiarUTC() (REQUISITOS.md §1.2, §4.2)
 src/
-  teensy/main.cpp      setup()/loop() del Teensy 4.1 (nivel 3)
-  adalogger/main.cpp   setup()/loop() del Feather M0 Adalogger (nivel 2)
-platformio.ini         entornos teensy41 y adalogger, librerías fijadas
+  teensy/main.cpp        setup()/loop(), gestor de sensores (§1.3), watchdog
+  teensy/sensores/       un módulo (.h/.cpp) por sensor (§1.2); sht45 es el
+                          único implementado de verdad
+  adalogger/main.cpp     setup()/loop() del Feather M0 Adalogger (nivel 2)
+lib/WDT_T4/              copia del watchdog del Teensy: no está en el
+                          registro de PlatformIO (§3.11)
+platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 ```
 
 | Entorno | Placa | Función | Archivos de log |
@@ -43,10 +61,10 @@ platformio.ini         entornos teensy41 y adalogger, librerías fijadas
 
 La mayoría de los pines y divisores de `REQUISITOS.md` §2.1 y §5 ya están
 decididos y fijados en `config_teensy.h`/`config_adalogger.h`. Quedan
-marcadas **[VERIFICAR]** solo dos cosas: no se inventan, se miden antes
-del vuelo. `verificarConfiguracion()` (llamada desde `setup()` en ambas
-placas) las controla en cada arranque y avisa si siguen sin confirmar
-(en `META` en el Teensy, por Serial en el Adalogger):
+marcadas **[VERIFICAR]** solo dos constantes: no se inventan, se miden
+antes del vuelo. `verificarConfiguracion()` (llamada desde `setup()` en
+ambas placas) las controla en cada arranque y avisa si siguen sin
+confirmar (en `META` en el Teensy, por Serial en el Adalogger):
 
 - el timeout de recuperación I²C (`COMETA_I2C_TIMEOUT_MS`): en el Teensy
   con la **prueba 13** (peor caso de clock stretching del SCD30); en el
@@ -55,11 +73,14 @@ placas) las controla en cada arranque y avisa si siguen sin confirmar
 - identificar por ROM las cuatro sondas DS18B20 tras el montaje (caja,
   pilas, centro, SCD30).
 
-Aparte, dos ítems de `REQUISITOS.md` §3 no dependen de un pin ni un
-divisor y siguen sin resolver porque tampoco se pueden fijar de
-antemano: si `DYN_MODEL_AIRBORNE1g` se guarda en flash o solo en BBR
-(§3.1), y qué frecuencias acepta `set_arm_clock()` en el core instalado
-(§3.8).
+Aparte hay tres ítems que no dependen de un pin ni un divisor y siguen
+sin resolver porque tampoco se pueden fijar de antemano en una
+constante:
+
+- si `DYN_MODEL_AIRBORNE1g` se guarda en flash o solo en BBR (§3.1),
+- qué frecuencias acepta `set_arm_clock()` en el core instalado (§3.8),
+- si el core expone la **causa del último reinicio** para registrarla en
+  `META`; si no la expone, queda documentado que no se registra (§3.11).
 
 ## Compilar
 
