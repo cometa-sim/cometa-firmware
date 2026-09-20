@@ -134,8 +134,15 @@ void setup() {
   verificarConfiguracion();
   configurarWatchdog();
 
+  // El watchdog ya está armado acá: hay que alimentarlo entre un paso
+  // del arranque y el siguiente (REQUISITOS.md §3.11). Montar la SD,
+  // buscar el primer nnn libre y configurar el GPS pueden sumar más de
+  // COMETA_WATCHDOG_TIMEOUT_S sin que nada esté colgado, y la placa se
+  // reiniciaría antes de llegar a loop(), una y otra vez.
   inicializarSD();
+  Watchdog.reset();
   abrirArchivoL2();
+  Watchdog.reset();
   inicializarGPS();
 }
 

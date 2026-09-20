@@ -92,6 +92,7 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 - **Teensy**: `WDT_T4`, timeout 8 s (`COMETA_WATCHDOG_TIMEOUT_S`).
 - **Adalogger**: `Adafruit_SleepyDog`, timeout 8 s (`COMETA_WATCHDOG_TIMEOUT_S`).
 - Se alimenta **una sola vez por pasada de `loop()`**, nunca dentro de un módulo de sensor: si un módulo se cuelga, el watchdog tiene que poder reiniciar la placa.
+- En `setup()`, una vez armado, se alimenta **entre un paso del arranque y el siguiente** (en el Teensy, entre un `iniciar()` y el siguiente; en el Adalogger, entre montar la SD, abrir el archivo y configurar el GPS). Un arranque lento pero sano —varios sensores ausentes, cada uno esperando su timeout de I²C— supera fácilmente los 8 s, y sin esto la placa se reiniciaría antes de llegar a `loop()` una y otra vez: ciclo de reinicios infinito y ni una fila de log. Una sola llamada que se cuelgue de verdad (más de 8 s) igual reinicia, que es lo que se quiere.
 - Versión de la librería fija en `lib_deps`, igual que el resto (§1).
 - Causa del último reinicio: se registra en `META` si el core la expone; si no, **[VERIFICAR]**.
 

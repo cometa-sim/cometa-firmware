@@ -195,15 +195,19 @@ EstadoSensor estadoICM20948 = {"ICM20948", SensorICM20948::iniciar,
                                 SensorICM20948::actualizar,
                                 SensorICM20948::llenarFila, false, 0, 0, 0};
 
-// Primer intento de iniciar(), al arrancar (REQUISITOS.md §1.3): cuenta
-// en reinit igual que un reintento, para que escribirMETA() pueda listar
-// los sensores ausentes desde el primer momento.
-void inicializarSensorAlArranque(EstadoSensor &s) {
+// Un intento de iniciar(): el primero al arrancar y cada reintento
+// posterior cuentan igual en reinit (REQUISITOS.md §1.3), para que
+// escribirMETA() pueda listar los sensores ausentes desde el primer
+// momento. Si falla, el próximo reintento se programa relativo a `ahora`
+// (no a un valor absoluto: si no, a partir del primer reintento la
+// comparación de abajo sería siempre cierta y se reintentaría en cada
+// tic en vez de cada COMETA_SENSOR_REINTENTO_MS).
+void intentarIniciarSensor(EstadoSensor &s, uint32_t ahora) {
   s.reinit++;
   reinitTotal++;
   s.presente = s.iniciar();
   if (!s.presente) {
-    s.proximoReintentoMs = COMETA_SENSOR_REINTENTO_MS;
+    s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
   }
 }
 
@@ -215,7 +219,7 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
     if ((int32_t)(ahora - s.proximoReintentoMs) < 0) {
       return;  // todavía no toca reintentar
     }
-    inicializarSensorAlArranque(s);  // mismo conteo de reinit que un reintento
+    intentarIniciarSensor(s, ahora);  // mismo conteo de reinit que el primer intento
     return;
   }
 
@@ -325,10 +329,23 @@ void setup() {
   verificarConfiguracion();
   configurarWatchdog();
 
+  // El watchdog ya está armado acá: hay que alimentarlo entre un
+  // iniciar() y el siguiente (REQUISITOS.md §3.11). Si no, un arranque
+  // lento pero sano — varios sensores I²C ausentes, cada uno esperando
+  // su timeout — supera los COMETA_WATCHDOG_TIMEOUT_S y la placa se
+  // reinicia antes de llegar a loop(), una y otra vez: ciclo de
+  // reinicios infinito y ni una fila de log. Alimentar acá no rompe la
+  // regla de "una sola vez por pasada de loop()": un iniciar() que se
+  // cuelga de verdad (más de 8 s en una sola llamada) igual reinicia.
+  // millis() se relee por sensor, no una vez antes del bucle: el arranque
+  // puede durar varios segundos si hay varios ausentes, y cada uno tiene
+  // que esperar 30 s desde su propio intento.
   for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
-    inicializarSensorAlArranque(sensores[i]);
+    intentarIniciarSensor(sensores[i], millis());
+    wdt.feed();
   }
-  inicializarSensorAlArranque(estadoICM20948);
+  intentarIniciarSensor(estadoICM20948, millis());
+  wdt.feed();
 
   escribirMETA();
 }
