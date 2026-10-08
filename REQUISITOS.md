@@ -97,12 +97,46 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 
 ### 2.2 Telemetría por radio (E220, solo Adalogger)
 
+**Función.** La radio sirve para **encontrar la sonda y seguirla en tiempo real**, de forma independiente del Teensy. De ahí salen el contenido, el formato y el ritmo de la trama.
+
+**Conexión y configuración del módulo**
+
 - Módulo **E220**, LoRa **920 MHz**, por UART: `Serial1` del Feather, **TX (D1) → RXD** del módulo, **RX (D0) ← TXD** del módulo.
 - **M0 y M1 a GND**: el módulo trabaja siempre en **modo normal (transparente)**. Lo que se escribe en `Serial1` sale por radio tal cual, y el firmware **no puede** cambiar la configuración del módulo.
-- Por eso la configuración del E220 (canal para 920 MHz, velocidad UART, velocidad de aire, potencia, dirección) se hace **antes del montaje**, con el adaptador USB o con M0 = M1 en alto, y se anota. Valores: **[VERIFICAR]**. La velocidad de `Serial1` en el firmware (`COMETA_E220_BAUD`) tiene que coincidir con la que quedó guardada en el módulo.
-- El pin **AUX no está conectado**: el firmware no sabe cuándo el módulo terminó de transmitir. La trama tiene que caber con margen en el tiempo entre dos envíos, a la velocidad de aire elegida.
-- **La radio no es el log.** El respaldo es `L2_nnn.CSV` en la SD. Una trama que no llega no se reintenta, y la radio no puede frenar el tic de 1000 ms ni la escritura en la SD: la trama se escribe entera de una vez, sin esperar respuesta del módulo. El buffer de salida de `Serial1` es chico: si se llena, `write()` espera a que salgan los bytes (unos 1 ms por byte a 9600 baudios), así que la trama tiene que ser corta.
-- Contenido, formato y periodo de la trama: **[VERIFICAR]**. Se definen antes de implementarla; un candidato es un subconjunto de `L2` (`utc`, `lat`, `lon`, `alt_m`, `fix`, `v_batt`).
+- Por eso la configuración del E220 (canal para 920 MHz, velocidad UART, velocidad de aire 2,4 kbps, potencia, dirección) se hace **antes del montaje**, con el adaptador USB o con M0 = M1 en alto, y se anota. Valores: **[VERIFICAR]**. La velocidad de `Serial1` en el firmware (`COMETA_E220_BAUD`) tiene que coincidir con la que quedó guardada en el módulo.
+- El pin **AUX no está conectado**: el firmware no sabe cuándo el módulo terminó de transmitir.
+
+**Qué se transmite: la fila `L2`, y nada más**
+
+Los datos científicos se quedan en el Teensy: mandarlos por radio alargaría la trama y ataría el nivel 2 al nivel 3, que es justo lo que la arquitectura evita (§2). La trama es la fila `L2` (§4.5) con dos cambios:
+
+| Campo | Contenido |
+|---|---|
+| `id` | identificador fijo de la sonda (`COMETA_RADIO_ID`, `C2`): la distingue de otras transmisiones en el mismo canal |
+| `n` | contador de tramas enviadas desde el arranque: los huecos dicen cuántas se perdieron, y una vuelta a 0 dice que la placa se reinició |
+| `utc` | `hhmmss` (compacto), en vez del ISO 8601 del log |
+| `lat`, `lon`, `alt_m`, `vz_ms`, `sats`, `fix`, `v_batt` | **igual que en `L2`**: mismos decimales (§4.5, `log_format.h`) y celda vacía cuando no hay dato (§4.2), para que en tierra un solo parser lea las dos fuentes |
+
+`t_ms` no va: lo reemplazan `id` y `n`. Ejemplo:
+
+```
+C2,412,143210,-33.245678,-58.031234,18240.0,5.20,9,3,4.98
+```
+
+Sin fix: `C2,413,,,,,,4,0,4.98` (la trama sale igual: dice que la sonda está viva).
+
+Para qué sirve cada campo durante el seguimiento: `lat`, `lon` y `alt_m` dicen adónde ir; `vz_ms` dice en qué fase está el vuelo (positiva en subida, muy negativa justo después del estallido, unos pocos m/s en el descenso con paracaídas, cero en tierra); `sats` y `fix` dicen cuánto confiar en la posición; `v_batt` dice cuánto va a durar la transmisión.
+
+**Cómo se transmite**
+
+- **Una trama cada `COMETA_RADIO_PERIODO_MS` = 5 s**, durante todo el vuelo **y después del aterrizaje**. No se espacia: las pilas duran mucho más que el vuelo y la posición en tierra es el dato que más vale. Si el E220 interfiere con el Geiger, se sube a 10 s: **[VERIFICAR]** en banco, comparando `cpi` con la radio encendida y apagada.
+- **También sin fix** (ver el ejemplo de arriba).
+- **Texto CSV** terminado con `println()` (CR LF), sin espacios ni unidades: se lee en el monitor serie y se analiza fácil.
+- **Sin checksum**: el E220 ya descarta los paquetes con CRC de radio incorrecto, así que en tierra llegan filas íntegras o no llega nada.
+- **La trama se arma entera en un buffer** (`snprintf`) y se escribe con **una sola** llamada. En modo transparente el módulo corta el paquete cuando la UART queda en silencio: una fila escrita en pedazos puede salir partida en dos paquetes.
+- **La radio nunca frena la SD.** En cada tic se escribe primero la fila en `L2_nnn.CSV` y después, si toca, la trama. La trama se manda sin esperar respuesta del módulo y no se reintenta. A 9600 baudios, 60 bytes tardan unos 60 ms en salir por la UART; si el buffer de salida de `Serial1` se llena, `write()` espera, por eso la trama tiene que ser corta.
+- **Largo**: unos 60 bytes con CR LF; en el peor caso (contador de 5 cifras, `alt_m` > 10 km, `vz_ms` negativa de dos cifras), unos 64. A 2,4 kbps de aire eso ocupa el canal unos 0,3 s: entra con margen en 5 s.
+- **Consumo**: depende de la potencia configurada en el módulo (**[VERIFICAR]**); el balance está en el manual.
 
 ## 3. Requisitos del firmware (manual, cap. 7)
 
