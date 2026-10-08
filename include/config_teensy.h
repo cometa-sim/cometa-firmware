@@ -34,6 +34,12 @@
 // NO setVal/VALSET)
 // -----------------------------------------------------------------------
 #define COMETA_GPS_I2C_ADDR         0x42
+// Espera máxima de getPVT() en cada tic. La librería espera hasta
+// 1100 ms por defecto; acá se acota al presupuesto de bloqueo (§1.2).
+// TODO VERIFICAR en el banco (prueba 1): si el SAM-M8Q tarda más en
+// contestar el pedido de NAV-PVT, getPVT() falla en cada tic y el GPS
+// queda ausente. Mirar loop_ms y la columna fix antes de cambiarlo.
+#define COMETA_GPS_ESPERA_PVT_MS    COMETA_BLOQUEO_MAX_MS
 // TODO VERIFICAR: ¿DYN_MODEL_AIRBORNE1g se guarda en flash o solo en BBR?
 // (REQUISITOS.md §3.1). Se decide al implementar inicializarGPS(): no es
 // un valor que se pueda fijar de antemano en una constante.
@@ -70,6 +76,13 @@
 #define COMETA_SCD30_PRESION_MIN_MBAR      700
 #define COMETA_SCD30_PRESION_MAX_MBAR      1400
 #define COMETA_SCD30_AUTO_SELF_CALIBRATION false
+// setAmbientPressure() relanza la medición continua: no se manda en cada
+// tic, solo cuando la presión cambió al menos esto desde el último envío.
+#define COMETA_SCD30_PRESION_DELTA_MBAR    5
+// El SCD30 da un dato cada 2 s: dataAvailable() == false es lo normal en
+// un tic de cada dos. Recién si pasa esto sin ningún dato nuevo se cuenta
+// como lectura fallida (REQUISITOS.md §1.3).
+#define COMETA_SCD30_SIN_DATO_MAX_MS       6000UL
 
 // -----------------------------------------------------------------------
 // §5 — MS8607 (I²C 0x76 + 0x40, fondo de escala 10 hPa)

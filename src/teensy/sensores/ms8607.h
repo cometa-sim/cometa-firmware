@@ -20,6 +20,12 @@ bool actualizar(uint32_t ahora);
 // Vuelca p_hPa, t_ms8607_C, rh_ms8607, solo si hay un dato nuevo.
 void llenarFila(FilaSCI &f);
 
+// Presión de la última lectura válida, en hPa; NAN si la última pasada
+// falló. La usa el SCD30 para setAmbientPressure() (REQUISITOS.md §3.4):
+// como el SCD30 se actualiza antes que el MS8607 en el tic, recibe la
+// presión del tic anterior (1 s de atraso, despreciable).
+float ultimaPresionHPa();
+
 }  // namespace SensorMS8607
 
 #endif  // COMETA_SENSOR_MS8607_H
