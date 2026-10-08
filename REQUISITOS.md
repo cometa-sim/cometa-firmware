@@ -77,8 +77,9 @@ Los intentos de `iniciar()` (el primero al arrancar y cada reintento) se cuentan
 
 | | Teensy 4.1 (nivel 3) | Feather M0 Adalogger (nivel 2) |
 |---|---|---|
-| Función | todos los sensores científicos | posición y altitud de respaldo |
-| Sensores | ver §5 | un SAM-M8Q propio |
+| Función | todos los sensores científicos | posición y altitud de respaldo, telemetría por radio |
+| Sensores | ver §5 | un SAM-M8Q propio (I²C) |
+| Radio | — | E220, LoRa 920 MHz, por `Serial1` (§2.2) |
 | SD | `BUILTIN_SDCARD` | chip select pin 4 |
 | Reloj | UTC del GPS | UTC del GPS |
 
@@ -88,10 +89,20 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 
 - El pack de baterías del Adalogger se conecta por el pin **USB** a través de un diodo (**1N5819** o **1N5817**), **nunca** por el conector **JST BAT**. Por eso el pin `A7` de fábrica del Feather M0 (pensado para medir la batería del JST) **no sirve** para medir este pack: hace falta un divisor propio en otro pin.
 - Divisores de tensión de batería: **100 kΩ / 100 kΩ** en `A1` (Adalogger), **100 kΩ / 33 kΩ** en `A0` (Teensy).
-  - Adalogger: el divisor va sobre el positivo del pack, **antes** del diodo.
+  - Adalogger: el divisor va sobre el positivo del pack, **después** del interruptor y **antes** del diodo.
   - Teensy: el divisor va **después** del interruptor del nivel 3 (mide la tensión que realmente llega a la placa, no la del pack).
   - En los dos: un cerámico de **100 nF** entre el punto medio del divisor y GND.
+- Adalogger: el SAM-M8Q y el E220 se alimentan desde el pin **3V** del Feather; masa común con el negativo del pack.
 - Regla: el **interruptor del nivel 3 en OFF antes de enchufar el USB**.
+
+### 2.2 Telemetría por radio (E220, solo Adalogger)
+
+- Módulo **E220**, LoRa **920 MHz**, por UART: `Serial1` del Feather, **TX (D1) → RXD** del módulo, **RX (D0) ← TXD** del módulo.
+- **M0 y M1 a GND**: el módulo trabaja siempre en **modo normal (transparente)**. Lo que se escribe en `Serial1` sale por radio tal cual, y el firmware **no puede** cambiar la configuración del módulo.
+- Por eso la configuración del E220 (canal para 920 MHz, velocidad UART, velocidad de aire, potencia, dirección) se hace **antes del montaje**, con el adaptador USB o con M0 = M1 en alto, y se anota. Valores: **[VERIFICAR]**. La velocidad de `Serial1` en el firmware (`COMETA_E220_BAUD`) tiene que coincidir con la que quedó guardada en el módulo.
+- El pin **AUX no está conectado**: el firmware no sabe cuándo el módulo terminó de transmitir. La trama tiene que caber con margen en el tiempo entre dos envíos, a la velocidad de aire elegida.
+- **La radio no es el log.** El respaldo es `L2_nnn.CSV` en la SD. Una trama que no llega no se reintenta, y la radio no puede frenar el tic de 1000 ms ni la escritura en la SD: la trama se escribe entera de una vez, sin esperar respuesta del módulo. El buffer de salida de `Serial1` es chico: si se llena, `write()` espera a que salgan los bytes (unos 1 ms por byte a 9600 baudios), así que la trama tiene que ser corta.
+- Contenido, formato y periodo de la trama: **[VERIFICAR]**. Se definen antes de implementarla; un candidato es un subconjunto de `L2` (`utc`, `lat`, `lon`, `alt_m`, `fix`, `v_batt`).
 
 ## 3. Requisitos del firmware (manual, cap. 7)
 
@@ -201,6 +212,7 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 | LTR390 | I²C | 0x53 | |
 | 2 × MAX31865 | SPI | CS: brazo exterior pin **10**, tubo pin **9** | 3 hilos |
 | PMS5003 | UART | `Serial1`: RX pin **0**, TX pin **1** | MOSFET en pin **4** |
+| E220 (Adalogger) | UART | `Serial1`: TX (D1) → RXD, RX (D0) ← TXD | M0 = M1 = GND, ver §2.2 |
 | 4 × DS18B20 | 1-Wire | pin **2**, pull-up 4,7 kΩ | |
 | GGreg20 | interrupción | vía optoacoplador, pin **3** | |
 
