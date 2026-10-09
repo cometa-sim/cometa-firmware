@@ -47,8 +47,8 @@ const SPISettings AJUSTES_SPI(1000000, MSBFIRST, SPI_MODE1);
 
 // Coeficientes de Callendar–Van Dusen (IEC 60751), los mismos que usa
 // Adafruit_MAX31865::temperature().
-const float RTD_A = 3.9083e-3f;
-const float RTD_B = -5.775e-7f;
+const float CVD_A = 3.9083e-3f;
+const float CVD_B = -5.775e-7f;
 
 // Una sonda: el chip, su CS y la última lectura.
 struct SondaPT1000 {
@@ -97,10 +97,10 @@ bool configuracionCorrecta(const SondaPT1000 &s) {
 // Callendar–Van Dusen; por debajo, el polinomio de ajuste de Adafruit
 // (para una PT100 equivalente), que en la estratosfera es el que manda.
 float temperaturaDesdeResistencia(float r) {
-  const float z1 = -RTD_A;
-  const float z2 = RTD_A * RTD_A - 4 * RTD_B;
-  const float z3 = (4 * RTD_B) / COMETA_MAX31865_RNOMINAL;
-  const float z4 = 2 * RTD_B;
+  const float z1 = -CVD_A;
+  const float z2 = CVD_A * CVD_A - 4 * CVD_B;
+  const float z3 = (4 * CVD_B) / COMETA_MAX31865_RNOMINAL;
+  const float z4 = 2 * CVD_B;
   float t = (sqrtf(z2 + z3 * r) + z1) / z4;
   if (t >= 0) {
     return t;
