@@ -20,6 +20,10 @@ namespace SensorGPS {
 // de esa relectura va a META (fuera de este módulo, ver main.cpp).
 bool iniciar();
 
+// Resultado de la relectura del último iniciar(): true si el receptor
+// confirmó DYN_MODEL_AIRBORNE1g. Lo escribe escribirMETA() (§3.1, §4.7).
+bool airborneConfirmado();
+
 bool actualizar(uint32_t ahora);
 
 // Vuelca lat, lon, alt_m, vz_ms, vn_ms, ve_ms, sats, pdop, fix, utc,

@@ -4,12 +4,14 @@
 // módulo en src/teensy/sensores/ con la interfaz común iniciar()/
 // actualizar()/llenarFila(). main.cpp arma la fila SCI, recorre los
 // módulos con un gestor genérico (reintentos y ausencia, REQUISITOS.md
-// §1.3) y escribe el log. Solo SHT45 está implementado de verdad: el
-// resto son cuerpos vacíos a completar por los estudiantes.
+// §1.3) y escribe el log. Los módulos de sensor están implementados
+// salvo Geiger y PMS5003; las funciones de este archivo marcadas TODO
+// (SD, META, batería, flags, ventana IMU) siguen pendientes.
 
 #include <Arduino.h>
 #include <SD.h>
 #include <Watchdog_t4.h>
+#include <Wire.h>
 
 #include "config_teensy.h"
 #include "log_format.h"
@@ -372,6 +374,11 @@ void setup() {
 
   verificarConfiguracion();
   wdt.feed();
+
+  // Bus I²C (REQUISITOS.md §5: SDA 18, SCL 19). Las librerías de SparkFun
+  // (GPS, SCD30, MS8607, ICM-20948) no lo arrancan solas. Queda a
+  // 100 kHz, el valor por defecto: el SCD30 no admite más.
+  Wire.begin();
 
   // millis() se relee por sensor, no una vez antes del bucle: el
   // arranque puede durar varios segundos si hay varios ausentes, y cada
