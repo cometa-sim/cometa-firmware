@@ -55,7 +55,7 @@ platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 | Entorno | Placa | Función | Archivos de log |
 |---|---|---|---|
 | `teensy41` | Teensy 4.1 | todos los sensores científicos | `SCI_nnn.CSV`, `IMU_nnn.CSV`, `META_nnn.TXT` |
-| `adalogger` | Feather M0 Adalogger | posición y altitud de respaldo | `L2_nnn.CSV` |
+| `adalogger` | Feather M0 Adalogger | posición y altitud de respaldo, telemetría E220 | `L2_nnn.CSV` |
 
 ## Valores pendientes de verificar
 

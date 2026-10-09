@@ -145,6 +145,29 @@ void flushLogSiCorresponde() {
 }
 
 // -----------------------------------------------------------------------
+// Telemetría por radio, E220 en COMETA_E220_SERIAL (REQUISITOS.md §2.2)
+// -----------------------------------------------------------------------
+
+// Abre COMETA_E220_SERIAL a COMETA_E220_BAUD. M0 y M1 están a GND: el
+// módulo ya está en modo transparente, no hay nada que configurar.
+void inicializarRadio() {
+  // TODO
+}
+
+// Cada COMETA_RADIO_PERIODO_MS, también sin fix: arma la trama
+// "id,n,hhmmss,lat,lon,alt_m,vz_ms,sats,fix,v_batt" en un buffer de
+// COMETA_RADIO_LARGO_MAX con snprintf() (mismos decimales que L2, celda
+// vacía si el campo es NAN o utc está vacío) y la manda con UNA sola
+// println(), sin esperar respuesta y sin reintentar. n cuenta las tramas
+// enviadas desde el arranque. Se llama DESPUÉS de escribir la fila en la
+// SD: la radio nunca frena el log.
+void enviarTramaRadio(const FilaL2 &f, uint32_t ahora) {
+  (void)f;
+  (void)ahora;
+  // TODO
+}
+
+// -----------------------------------------------------------------------
 // setup() / loop()
 // -----------------------------------------------------------------------
 
@@ -169,6 +192,8 @@ void setup() {
   abrirArchivoL2();
   Watchdog.reset();
   inicializarGPS();
+  Watchdog.reset();
+  inicializarRadio();
   Watchdog.reset();
 }
 
@@ -196,5 +221,8 @@ void loop() {
 
     escribirFilaL2(archivoL2, filaL2);
     flushLogSiCorresponde();
+
+    // Después de la SD, nunca antes (REQUISITOS.md §2.2).
+    enviarTramaRadio(filaL2, ahora);
   }
 }

@@ -69,6 +69,26 @@
 #define COMETA_VBATT_DIVISOR_FACTOR 2.0
 
 // -----------------------------------------------------------------------
+// §2.2 — Telemetría por radio: E220 (LoRa 920 MHz) en Serial1, TX (D1)
+// -> RXD, RX (D0) <- TXD. M0 y M1 a GND: modo normal (transparente); la
+// configuración del módulo (canal, velocidad de aire, potencia) se hace
+// antes del montaje y el firmware no la puede cambiar.
+// -----------------------------------------------------------------------
+#define COMETA_E220_SERIAL Serial1
+// TODO VERIFICAR: tiene que coincidir con la velocidad UART guardada en
+// el E220 (9600 8N1 de fábrica) (REQUISITOS.md §2.2).
+#define COMETA_E220_BAUD   9600UL
+
+// Trama de radio (REQUISITOS.md §2.2): la fila L2 con id y contador en
+// vez de t_ms, y utc como hhmmss.
+#define COMETA_RADIO_ID "C2"
+// TODO VERIFICAR en banco: si el E220 interfiere con el Geiger (comparar
+// cpi con la radio encendida y apagada), subir a 10000UL.
+#define COMETA_RADIO_PERIODO_MS 5000UL
+// Largo máximo de la trama, sin CR LF: el peor caso es ~62 caracteres.
+#define COMETA_RADIO_LARGO_MAX 80
+
+// -----------------------------------------------------------------------
 // §4.1 — Archivo (nombres 8.3 en mayúsculas, FAT16)
 // -----------------------------------------------------------------------
 #define COMETA_L2_PREFIJO "L2_"
