@@ -21,6 +21,10 @@ cada archivo dice al principio qué viene del banco de prueba y qué se
 cambió. Todavía falta probarlos en el banco uno por uno (§8). En el
 ICM-20948 falta la lectura por FIFO (§7).
 
+El **Adalogger** (`src/adalogger/main.cpp`) está completo: GPS SAM-M8Q en
+modo Airborne, `L2_nnn.CSV` nuevo en cada arranque con `flush()` cada 10
+filas, batería en A1 y trama de radio por el E220 cada 5 s (§2.2).
+
 Dos cosas antes de escribir un módulo:
 
 - **El presupuesto de bloqueo** (§1.2): en el tic de 1000 ms una llamada

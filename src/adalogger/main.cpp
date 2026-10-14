@@ -1,8 +1,9 @@
 // COMETA · Feather M0 Adalogger (nivel 2) — posición y altitud de respaldo
 //
-// Impalcatura del firmware: setup()/loop() llaman a funciones declaradas
-// pero vacías. La única lógica implementada de verdad es la escritura
-// del encabezado CSV (REQUISITOS.md §4).
+// GPS SAM-M8Q por I²C -> fila L2 en la SD (L2_nnn.CSV) cada 1 s ->
+// trama de radio por el E220 cada COMETA_RADIO_PERIODO_MS
+// (REQUISITOS.md §2, §2.2, §4.5). Mensajes de diagnóstico por Serial:
+// esta placa no tiene META.
 //
 // Esta placa es independiente de la del Teensy (REQUISITOS.md §2): no
 // asume nada de la otra cadena. La única relación entre los dos logs es
@@ -10,7 +11,9 @@
 
 #include <Arduino.h>
 #include <SD.h>
+#include <Wire.h>
 #include <Adafruit_SleepyDog.h>
+#include <SparkFun_u-blox_GNSS_v3.h>
 
 #include "config_adalogger.h"
 #include "log_format.h"
@@ -19,6 +22,7 @@
 // Archivo de log (REQUISITOS.md §4.1)
 // -----------------------------------------------------------------------
 File archivoL2;
+char nombreL2[16] = "";  // "L2_nnn.CSV"; vacío si la SD no montó
 
 // Fila L2 en construcción durante el tic de 1000 ms (REQUISITOS.md
 // §4.5). limpiarFilaL2() la vacía al principio de cada tic.
@@ -57,13 +61,37 @@ void configurarWatchdog() {
 // Monta la SD (chip select COMETA_SD_CS_PIN) y busca el primer número
 // nnn libre para el archivo de esta corrida (REQUISITOS.md §2, §4.1).
 void inicializarSD() {
-  // TODO
+  if (!SD.begin(COMETA_SD_CS_PIN)) {
+    Serial.println("SD: no monta (chip select pin 4); se sigue sin log");
+    return;
+  }
+  for (int n = 0; n < COMETA_L2_MAX_ARCHIVOS; n++) {
+    snprintf(nombreL2, sizeof(nombreL2), COMETA_L2_PREFIJO "%03d" COMETA_L2_EXT, n);
+    if (!SD.exists(nombreL2)) {
+      return;
+    }
+  }
+  Serial.println("SD: no queda ningún nnn libre (000-999)");
+  nombreL2[0] = '\0';
 }
 
-// Crea L2_nnn.CSV y escribe su encabezado (REQUISITOS.md §4.1, §4.5).
+// Crea L2_nnn.CSV y escribe su encabezado (REQUISITOS.md §4.1, §4.5). Un
+// archivo nuevo en cada arranque: si la alimentación se corta, el
+// anterior queda cerrado e intacto.
 void abrirArchivoL2() {
-  // TODO: crear el archivo con el primer nnn libre.
+  if (nombreL2[0] == '\0') {
+    return;
+  }
+  archivoL2 = SD.open(nombreL2, FILE_WRITE);
+  if (!archivoL2) {
+    Serial.print("SD: no se pudo crear ");
+    Serial.println(nombreL2);
+    return;
+  }
   escribirEncabezadoL2(archivoL2);
+  archivoL2.flush();
+  Serial.print("SD: escribiendo en ");
+  Serial.println(nombreL2);
 }
 
 // -----------------------------------------------------------------------
@@ -95,8 +123,23 @@ void verificarConfiguracion() {
 
 // Envía DYN_MODEL_AIRBORNE1g (CFG-NAV5 legacy), relee con
 // getDynamicModel() y registra el resultado (REQUISITOS.md §3.1).
+SFE_UBLOX_GNSS gps;
+bool gpsPresente = false;
+uint32_t proximoReintentoGPSMs = 0;
+
+void recuperarBusI2C();
+
 void inicializarGPS() {
-  // TODO
+  gpsPresente = gps.begin(Wire, COMETA_GPS_I2C_ADDR);
+  if (!gpsPresente) {
+    Serial.println("GPS: no responde en 0x42; se reintenta cada 30 s");
+    proximoReintentoGPSMs = millis() + COMETA_GPS_REINTENTO_MS;
+    return;
+  }
+  gps.setDynamicModel(DYN_MODEL_AIRBORNE1g);
+  const bool airborne = (gps.getDynamicModel() == DYN_MODEL_AIRBORNE1g);
+  Serial.println(airborne ? "GPS: modo Airborne <1g confirmado"
+                          : "GPS: el modo Airborne <1g NO quedó (REQUISITOS.md §3.1)");
 }
 
 // Lee posición, altitud, vz_ms, sats, fix y UTC del GPS
@@ -105,8 +148,37 @@ void inicializarGPS() {
 // nunca con strcpy() directo: es un char[21] justo y un desborde pisaría
 // lat y lon (REQUISITOS.md §4.2).
 void leerGPS(FilaL2 &f) {
-  (void)f;
-  // TODO
+  if (!gpsPresente) {
+    if ((int32_t)(millis() - proximoReintentoGPSMs) >= 0) {
+      inicializarGPS();
+    }
+    return;
+  }
+  if (!gps.getPVT(COMETA_GPS_ESPERA_PVT_MS)) {
+    recuperarBusI2C();
+    return;  // sin respuesta en este tic: celdas vacías
+  }
+
+  // El receptor contestó: fix y sats van siempre, dicen por qué no hay
+  // posición. utc, posición, altitud y velocidad solo con fix 3D válido.
+  const uint8_t tipoFix = gps.getFixType();
+  f.fix = tipoFix;
+  f.sats = gps.getSIV();
+
+  if (tipoFix < 3 || !gps.getGnssFixOk()) {
+    return;  // utc también vacío hasta tener fix (REQUISITOS.md §4.2)
+  }
+  if (gps.getTimeValid() && gps.getDateValid()) {
+    char cadena[32];
+    snprintf(cadena, sizeof(cadena), "%04u-%02u-%02uT%02u:%02u:%02uZ",
+             gps.getYear(), gps.getMonth(), gps.getDay(), gps.getHour(),
+             gps.getMinute(), gps.getSecond());
+    copiarUTC(f.utc, cadena);
+  }
+  f.lat = gps.getLatitude() / 1e7;          // 1e-7 grados -> grados
+  f.lon = gps.getLongitude() / 1e7;
+  f.alt_m = gps.getAltitudeMSL() / 1000.0f;  // mm -> m sobre el nivel del mar
+  f.vz_ms = -gps.getNedDownVel() / 1000.0f;  // positiva hacia arriba (§4.2)
 }
 
 // -----------------------------------------------------------------------
@@ -116,8 +188,26 @@ void leerGPS(FilaL2 &f) {
 // Si SDA queda baja: 9 pulsos en SCL y reinicializar (REQUISITOS.md
 // §3.3). Se llama desde leerGPS() cuando detecta un error o timeout, no
 // en cada vuelta de loop().
+uint32_t recuperacionesI2C = 0;
+
 void recuperarBusI2C() {
-  // TODO
+  Wire.end();
+  pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
+  if (digitalRead(PIN_WIRE_SDA) == LOW) {
+    // Algún dispositivo quedó a mitad de un byte sosteniendo SDA: con
+    // pulsos de reloj termina de sacarlo y suelta la línea.
+    pinMode(PIN_WIRE_SCL, OUTPUT);
+    for (int i = 0; i < COMETA_I2C_RECOVERY_PULSOS_SCL; i++) {
+      digitalWrite(PIN_WIRE_SCL, LOW);
+      delayMicroseconds(5);
+      digitalWrite(PIN_WIRE_SCL, HIGH);
+      delayMicroseconds(5);
+    }
+    recuperacionesI2C++;
+    Serial.print("I2C: SDA baja, recuperación #");
+    Serial.println(recuperacionesI2C);
+  }
+  Wire.begin();
 }
 
 // -----------------------------------------------------------------------
@@ -127,8 +217,9 @@ void recuperarBusI2C() {
 // Lee v_batt por ADC (REQUISITOS.md §3.10). Vuelca en f, solo si hay un
 // dato nuevo.
 void leerBateria(FilaL2 &f) {
-  (void)f;
-  // TODO
+  const int lectura = analogRead(COMETA_VBATT_ADC_PIN);
+  f.v_batt = lectura * (COMETA_ADC_VREF / ((1 << COMETA_ADC_BITS) - 1)) *
+             COMETA_VBATT_DIVISOR_FACTOR;
 }
 
 // -----------------------------------------------------------------------
@@ -141,7 +232,14 @@ void leerBateria(FilaL2 &f) {
 
 // flush() cada COMETA_FLUSH_CADA_N_MUESTRAS muestras (REQUISITOS.md §3.2).
 void flushLogSiCorresponde() {
-  // TODO
+  static uint32_t filasSinFlush = 0;
+  if (!archivoL2) {
+    return;
+  }
+  if (++filasSinFlush >= COMETA_FLUSH_CADA_N_MUESTRAS) {
+    archivoL2.flush();
+    filasSinFlush = 0;
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -151,8 +249,25 @@ void flushLogSiCorresponde() {
 // Abre COMETA_E220_SERIAL a COMETA_E220_BAUD. M0 y M1 están a GND: el
 // módulo ya está en modo transparente, no hay nada que configurar.
 void inicializarRadio() {
-  // TODO
+  COMETA_E220_SERIAL.begin(COMETA_E220_BAUD);
 }
+
+// Print que escribe en un buffer en memoria: así la trama se arma entera
+// con los mismos print(valor, decimales) del log y sale en una sola
+// write() (en modo transparente el E220 corta el paquete cuando la UART
+// queda en silencio, REQUISITOS.md §2.2).
+class BufferTrama : public Print {
+ public:
+  size_t write(uint8_t c) override {
+    if (largo >= sizeof(datos)) {
+      return 0;  // no entra: se trunca, nunca se desborda
+    }
+    datos[largo++] = c;
+    return 1;
+  }
+  uint8_t datos[COMETA_RADIO_LARGO_MAX + 2];  // + CR LF
+  size_t largo = 0;
+};
 
 // Cada COMETA_RADIO_PERIODO_MS, también sin fix: arma la trama
 // "id,n,hhmmss,lat,lon,alt_m,vz_ms,sats,fix,v_batt" en un buffer de
@@ -162,9 +277,49 @@ void inicializarRadio() {
 // enviadas desde el arranque. Se llama DESPUÉS de escribir la fila en la
 // SD: la radio nunca frena el log.
 void enviarTramaRadio(const FilaL2 &f, uint32_t ahora) {
-  (void)f;
-  (void)ahora;
-  // TODO
+  static bool primera = true;
+  static uint32_t ultimaTramaMs = 0;
+  static uint32_t contador = 0;
+  if (!primera && ahora - ultimaTramaMs < COMETA_RADIO_PERIODO_MS) {
+    return;
+  }
+  primera = false;
+  ultimaTramaMs = ahora;
+
+  BufferTrama trama;
+  trama.print(COMETA_RADIO_ID);
+  trama.print(',');
+  trama.print(contador++);
+  trama.print(',');
+  // utc compacto: "2026-10-15T13:02:05Z" -> "130205"; vacío sin hora.
+  if (strlen(f.utc) >= 19) {
+    const char hhmmss[7] = {f.utc[11], f.utc[12], f.utc[14],
+                            f.utc[15], f.utc[17], f.utc[18], '\0'};
+    trama.print(hhmmss);
+  }
+  // El resto, con las mismas macros de log_format.h que escriben la fila
+  // L2: mismos decimales y misma celda vacía (un solo parser en tierra).
+  // t_ms y utc no van: los reemplazan id, n y hhmmss.
+#define RADIO_CAMPO_U32(campo, decimales)
+#define RADIO_CAMPO_UTC(campo, decimales)
+#define RADIO_CAMPO_LL(campo, decimales) \
+  trama.print(',');                       \
+  COMETA_CAMPO_ESCRIBE_LL(trama, campo, decimales);
+#define RADIO_CAMPO_F(campo, decimales) \
+  trama.print(',');                      \
+  COMETA_CAMPO_ESCRIBE_F(trama, campo, decimales);
+#define RADIO_CAMPO(nombre, tipo, decimales) RADIO_CAMPO_##tipo(f.nombre, decimales)
+  COMETA_L2_CAMPOS(RADIO_CAMPO)
+#undef RADIO_CAMPO
+#undef RADIO_CAMPO_F
+#undef RADIO_CAMPO_LL
+#undef RADIO_CAMPO_UTC
+#undef RADIO_CAMPO_U32
+  trama.print("\r\n");
+
+  COMETA_E220_SERIAL.write(trama.datos, trama.largo);  // una sola vez, sin esperar
+  Serial.print("RADIO: ");
+  Serial.write(trama.datos, trama.largo);
 }
 
 // -----------------------------------------------------------------------
@@ -184,6 +339,9 @@ void setup() {
   // libre y configurar el GPS sí suman más sin que nada esté colgado, y
   // la placa se reiniciaría antes de llegar a loop(), una y otra vez.
   configurarWatchdog();
+
+  analogReadResolution(COMETA_ADC_BITS);
+  Wire.begin();
 
   verificarConfiguracion();
   Watchdog.reset();
