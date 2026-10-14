@@ -4,8 +4,8 @@
 // módulo en src/teensy/sensores/ con la interfaz común iniciar()/
 // actualizar()/llenarFila(). main.cpp arma la fila SCI, recorre los
 // módulos con un gestor genérico (reintentos y ausencia, REQUISITOS.md
-// §1.3) y escribe el log. Los módulos de sensor están implementados
-// salvo Geiger y PMS5003; las funciones de este archivo marcadas TODO
+// §1.3) y escribe el log. Los módulos de sensor están implementados;
+// las funciones de este archivo marcadas TODO
 // (SD, META, batería, flags, ventana IMU) siguen pendientes.
 
 #include <Arduino.h>
@@ -297,6 +297,7 @@ void actualizarBufferIMU() {
 // Evalúa armado (altitud > 10 km, o p_hPa < 250 si el GPS no es válido) y
 // el disparo (caída libre |a| < 0.3 g >= 1 s, o respaldo GPS vz_ms < −10
 // durante 3 fixes). Una sola ventana, sin rearmado (REQUISITOS.md §7).
+// En el disparo, llamar también a SensorPMS5003::marcarDescenso() (§6).
 void verificarDisparoIMU() {
   // TODO
 }
@@ -459,6 +460,9 @@ void loop() {
     // arriba: decide según altitud y T exterior, con histéresis
     // (REQUISITOS.md §6), no según si "responde".
     SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_arm_C);
+    // pms_on va en todas las filas, también con el sensor ausente: sin
+    // eso no se distingue un cero de un sensor apagado (REQUISITOS.md §6).
+    filaSCI.pms_on = SensorPMS5003::estaEncendido() ? 1 : 0;
 
     leerBateria(filaSCI);
     calcularFlagsCalidad(filaSCI);

@@ -158,6 +158,11 @@
 // Primeras muestras a descartar tras cada encendido: el ventilador tarda
 // en estabilizarse (REQUISITOS.md §6).
 #define COMETA_PMS_CALENTAMIENTO_S 30UL
+// En modo activo el PMS5003 manda una trama cada 0,2–2,3 s. Encendido y
+// ya caliente, si pasa esto sin ninguna trama válida, la lectura cuenta
+// como fallida (REQUISITOS.md §1.3); tras 5 fallos el gestor lo marca
+// ausente y el reintento de iniciar() le corta y devuelve la masa.
+#define COMETA_PMS_SIN_TRAMA_MAX_MS 5000UL
 
 // -----------------------------------------------------------------------
 // §2.1, §3.10, §4.3 — Tensión de batería por ADC. Divisor 100 kΩ / 33 kΩ

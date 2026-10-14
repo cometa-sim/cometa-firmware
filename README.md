@@ -14,13 +14,12 @@ y 8). Si algo de este repositorio contradice un ejemplo de librería, manda
 El contrato del firmware ya está cerrado: formato de log, interfaz de los
 módulos de sensor, presupuesto de bloqueo, manejo de sensores ausentes y
 watchdog (`REQUISITOS.md` §1.1–§1.3, §3.11). **SHT45** es el módulo de
-ejemplo. GPS, SCD30, MS8607, LTR390, MAX31865, DS18B20 e ICM-20948
-están implementados a partir del banco de prueba de los estudiantes
+ejemplo. GPS, SCD30, MS8607, LTR390, MAX31865, DS18B20, ICM-20948,
+Geiger y PMS5003 están implementados a partir del banco de prueba de los estudiantes
 (`cometa-sim/COMETA-Teensy41`), corregidos para cumplir `REQUISITOS.md`;
 cada archivo dice al principio qué viene del banco de prueba y qué se
-cambió. Todavía falta probarlos en el banco uno por uno (§8). Quedan
-vacíos `geiger.cpp` y `pms5003.cpp`, y en el ICM-20948 la lectura por
-FIFO (§7).
+cambió. Todavía falta probarlos en el banco uno por uno (§8). En el
+ICM-20948 falta la lectura por FIFO (§7).
 
 Dos cosas antes de escribir un módulo:
 
