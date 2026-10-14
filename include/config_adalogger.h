@@ -28,6 +28,11 @@
 // CFG-NAV5 legacy, NO setVal/VALSET)
 // -----------------------------------------------------------------------
 #define COMETA_GPS_I2C_ADDR 0x42
+// Espera máxima de getPVT() en cada tic: la librería espera hasta
+// 1100 ms por defecto y el tic es de 1000 ms.
+#define COMETA_GPS_ESPERA_PVT_MS 250
+// Si el GPS no respondió al arrancar, se reintenta begin() cada tanto.
+#define COMETA_GPS_REINTENTO_MS 30000UL
 // TODO VERIFICAR: ¿DYN_MODEL_AIRBORNE1g se guarda en flash o solo en BBR?
 // (REQUISITOS.md §3.1). Se decide al implementar inicializarGPS(): no es
 // un valor que se pueda fijar de antemano en una constante.
@@ -67,6 +72,9 @@
 // -----------------------------------------------------------------------
 #define COMETA_VBATT_ADC_PIN        A1
 #define COMETA_VBATT_DIVISOR_FACTOR 2.0
+// ADC del SAMD21: referencia 3,3 V, lectura a 12 bits.
+#define COMETA_ADC_VREF 3.3
+#define COMETA_ADC_BITS 12
 
 // -----------------------------------------------------------------------
 // §2.2 — Telemetría por radio: E220 (LoRa 920 MHz) en Serial1, TX (D1)
@@ -93,6 +101,8 @@
 // -----------------------------------------------------------------------
 #define COMETA_L2_PREFIJO "L2_"
 #define COMETA_L2_EXT     ".CSV"
+// nnn va de 000 a 999.
+#define COMETA_L2_MAX_ARCHIVOS 1000
 
 // -----------------------------------------------------------------------
 // §3.11 — Watchdog (Adafruit_SleepyDog, timeout en segundos)
