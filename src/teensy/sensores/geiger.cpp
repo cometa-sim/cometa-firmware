@@ -6,24 +6,23 @@
 // Si no hay ISR conectada se pierden pulsos desde el primer instante, y
 // si el contador deja de ser volatile el compilador puede cachearlo y
 // las cuentas salen mal de una forma que no se ve hasta analizar el
-// vuelo. El resto (iniciar/actualizar/llenarFila) sí es impalcatura:
-// cuerpos vacíos a completar.
+// vuelo.
+//
+// El resto (iniciar/actualizar/llenarFila) está implementado a partir
+// del banco de prueba de los estudiantes (COMETA-Teensy41, main.cpp
+// hasta 6ba266c): pin 3 con pull-up interno, interrupción en el flanco
+// de bajada (el optoacoplador tira la línea a GND en cada pulso) y la
+// lectura del contador con las interrupciones deshabilitadas.
+//
+// Cambio respecto del banco de prueba, para cumplir REQUISITOS.md §4.3
+// y §5: el contador se lee y se pone a cero en CADA tic de 1 s y se
+// guarda por intervalo (cpi = conteos, dt_ms = duración real), no como
+// CPM sobre 60 s. Con los conteos por intervalo se calculan después los
+// CPM y también el factor de Fano, que con un único total por minuto no
+// se puede calcular.
 //
 // Este módulo no pasa por la máquina de presencia/ausencia
 // (REQUISITOS.md §1.3): main.cpp lo llama directo.
-//
-// TODO implementar (REQUISITOS.md §4.3, §5):
-//   - iniciar(): pinMode(COMETA_GEIGER_PIN, ...) y
-//     attachInterrupt(digitalPinToInterrupt(COMETA_GEIGER_PIN), isr, ...).
-//   - actualizar()/llenarFila(): la lectura y el azaramiento del
-//     contador van en un único bloque con interrupciones deshabilitadas,
-//     para no perder ni duplicar un pulso que llegue justo en el medio:
-//       noInterrupts();
-//       uint32_t cuenta = contadorPulsos;
-//       contadorPulsos = 0;
-//       interrupts();
-//     cpi = cuenta; dt_ms = milisegundos reales desde la última lectura
-//     (no siempre exactamente 1000, por eso se guarda aparte).
 
 #include "geiger.h"
 
@@ -34,31 +33,47 @@ namespace SensorGeiger {
 namespace {
 
 // La ISR solo incrementa un contador (REQUISITOS.md §5): nada de
-// trabajo pesado ahí adentro. Todavía no está conectada con
-// attachInterrupt() (ver TODO de iniciar() más abajo): el atributo
-// evita el warning de función sin usar mientras tanto.
+// trabajo pesado ahí adentro. Se conecta en iniciar().
 volatile uint32_t contadorPulsos = 0;
 
-__attribute__((unused)) void isrPulso() {
+void isrPulso() {
   contadorPulsos++;
 }
+
+// Intervalo cerrado en la última pasada de actualizar().
+uint32_t cuentaIntervalo = 0;
+uint32_t duracionIntervaloMs = 0;
+uint32_t inicioIntervaloMs = 0;
 
 }  // namespace
 
 bool iniciar() {
-  // TODO
-  return false;
+  pinMode(COMETA_GEIGER_PIN, INPUT_PULLUP);
+  inicioIntervaloMs = millis();
+  attachInterrupt(digitalPinToInterrupt(COMETA_GEIGER_PIN), isrPulso, FALLING);
+  return true;
 }
 
 bool actualizar(uint32_t ahora) {
-  (void)ahora;
-  // TODO
-  return false;
+  // Lectura y puesta a cero en un solo bloque, para no perder ni
+  // duplicar un pulso que llegue justo en el medio (REQUISITOS.md §5).
+  noInterrupts();
+  const uint32_t cuenta = contadorPulsos;
+  contadorPulsos = 0;
+  interrupts();
+
+  cuentaIntervalo = cuenta;
+  duracionIntervaloMs = ahora - inicioIntervaloMs;  // 0 = celda vacía (§4.2)
+  inicioIntervaloMs = ahora;
+  return true;  // un pin con interrupción no tiene cómo fallar (§1.3)
 }
 
 void llenarFila(FilaSCI &f) {
-  (void)f;
-  // TODO
+  if (duracionIntervaloMs == 0) {
+    return;  // intervalo vacío: celda vacía (REQUISITOS.md §4.2)
+  }
+  f.cpi = cuentaIntervalo;
+  f.dt_ms = duracionIntervaloMs;
 }
 
 }  // namespace SensorGeiger
