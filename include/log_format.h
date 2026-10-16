@@ -228,14 +228,14 @@ inline void limpiarFilaSCI(FilaSCI &fila) {
 
 // Escribe el encabezado de SCI_nnn.CSV con los nombres de columna
 // exactos de REQUISITOS.md §4.3.
-inline void escribirEncabezadoSCI(File &archivo) {
+inline void escribirEncabezadoSCI(Print &archivo) {
   archivo.println(COMETA_SCI_CAMPOS(COMETA_CAMPO_HDR) + 1);
 }
 
 // Escribe una fila de SCI_nnn.CSV a partir de fila. Celda vacía = no
 // hubo lectura en esa fila (REQUISITOS.md §4.2): no repite el último
 // valor, no inventa ceros.
-inline void escribirFilaSCI(File &archivo, const FilaSCI &fila) {
+inline void escribirFilaSCI(Print &archivo, const FilaSCI &fila) {
   bool primero = true;
 #define COMETA_CAMPO_COMA() \
   do { \
@@ -265,11 +265,11 @@ inline void limpiarFilaIMU(FilaIMU &fila) {
 
 // Escribe el encabezado de IMU_nnn.CSV con los nombres de columna
 // exactos de REQUISITOS.md §4.6.
-inline void escribirEncabezadoIMU(File &archivo) {
+inline void escribirEncabezadoIMU(Print &archivo) {
   archivo.println(COMETA_IMU_CAMPOS(COMETA_CAMPO_HDR) + 1);
 }
 
-inline void escribirFilaIMU(File &archivo, const FilaIMU &fila) {
+inline void escribirFilaIMU(Print &archivo, const FilaIMU &fila) {
   bool primero = true;
 #define COMETA_CAMPO_COMA() \
   do { \
@@ -299,11 +299,11 @@ inline void limpiarFilaL2(FilaL2 &fila) {
 
 // Escribe el encabezado de L2_nnn.CSV con los nombres de columna exactos
 // de REQUISITOS.md §4.5.
-inline void escribirEncabezadoL2(File &archivo) {
+inline void escribirEncabezadoL2(Print &archivo) {
   archivo.println(COMETA_L2_CAMPOS(COMETA_CAMPO_HDR) + 1);
 }
 
-inline void escribirFilaL2(File &archivo, const FilaL2 &fila) {
+inline void escribirFilaL2(Print &archivo, const FilaL2 &fila) {
   bool primero = true;
 #define COMETA_CAMPO_COMA() \
   do { \

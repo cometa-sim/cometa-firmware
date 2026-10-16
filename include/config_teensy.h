@@ -204,6 +204,9 @@
 #define COMETA_SCI_EXT  ".CSV"
 #define COMETA_IMU_EXT  ".CSV"
 #define COMETA_META_EXT ".TXT"
+// nnn va de 000 a 999: tres cifras para que el nombre siga siendo 8.3
+// ("META_nnn" son 8 caracteres).
+#define COMETA_MAX_ARCHIVOS 1000
 
 // -----------------------------------------------------------------------
 // §1.3 — Sensores que no responden: reintento de iniciar() y umbral de
