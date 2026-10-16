@@ -259,7 +259,9 @@ void cerrarCampo() {
     Serial.println();
     camposEnRenglon = 0;
   } else {
-    for (uint8_t i = anchoEscrito; i < ANCHO_CAMPO; i++) {
+    // Al menos un espacio, aunque el campo llene el ancho (utc).
+    Serial.print(' ');
+    for (uint8_t i = anchoEscrito + 1; i < ANCHO_CAMPO; i++) {
       Serial.print(' ');
     }
   }
