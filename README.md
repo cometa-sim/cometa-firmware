@@ -53,6 +53,8 @@ src/
   teensy/sensores/       un módulo (.h/.cpp) por sensor (§1.2); sht45 es el
                           de ejemplo
   adalogger/main.cpp     setup()/loop() del Feather M0 Adalogger (nivel 2)
+  banco/main.cpp         banco de prueba por USB: los mismos módulos de
+                          teensy/sensores/, salida por Serial (no vuela)
 lib/WDT_T4/              copia del watchdog del Teensy: no está en el
                           registro de PlatformIO (§3.11)
 platformio.ini           entornos teensy41 y adalogger, librerías fijadas
@@ -62,6 +64,7 @@ platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 |---|---|---|---|
 | `teensy41` | Teensy 4.1 | todos los sensores científicos | `SCI_nnn.CSV`, `IMU_nnn.CSV`, `META_nnn.TXT` |
 | `adalogger` | Feather M0 Adalogger | posición y altitud de respaldo, telemetría E220 | `L2_nnn.CSV` |
+| `banco` | Teensy 4.1 | prueba de sensores por USB, sin SD ni watchdog | ninguno: todo por Serial |
 
 ## Valores pendientes de verificar
 
@@ -95,6 +98,27 @@ pio run                  # compila ambos entornos
 pio run -e teensy41       # solo el Teensy 4.1
 pio run -e adalogger       # solo el Feather M0 Adalogger
 ```
+
+## Probar los sensores desde el computador
+
+El entorno `banco` arma el Teensy con los mismos módulos de
+`src/teensy/sensores/` que el firmware de vuelo, pero sin SD, META ni
+watchdog: al arrancar escanea el I²C y compara con las direcciones
+esperadas, y cada segundo imprime por Serial qué sensores están presentes
+y las celdas no vacías de la fila SCI. Un sensor que falta queda
+AUSENTE y se reintenta cada 30 s, sin trabar a los demás: se puede
+probar con solo una parte de los sensores conectados.
+
+```sh
+pio run -e banco -t upload
+pio device monitor -e banco
+```
+
+Alimentación: solo el USB, **sin pilas** conectadas. El riel de 5 V de
+la Perma-Proto (PMS5003 y GGreg20) normalmente viene del MPM3610: en el
+banco se lo alimenta con un puente desde VIN del Teensy hasta la bornera
+de entrada de la Perma-Proto, con el cable del MPM3610 desconectado de
+esa bornera. Sacar el puente antes de volver a conectar las pilas.
 
 ## Licencia
 

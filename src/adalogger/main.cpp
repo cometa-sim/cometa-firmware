@@ -13,7 +13,9 @@
 #include <SD.h>
 #include <Wire.h>
 #include <Adafruit_SleepyDog.h>
-#include <SparkFun_u-blox_GNSS_v3.h>
+// Librería v2, no v3: la v3 solo habla VALGET/VALSET, que el M8 no
+// entiende (begin() falla siempre). La v2 usa CFG-NAV5 legacy (§3.1).
+#include <SparkFun_u-blox_GNSS_Arduino_Library.h>
 
 #include "config_adalogger.h"
 #include "log_format.h"
