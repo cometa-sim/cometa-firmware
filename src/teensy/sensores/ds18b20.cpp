@@ -19,6 +19,13 @@
 //     sonda da un dato nuevo cada 2 s y las filas del medio van vacías
 //     (§4.2).
 //   - Sonda desconectada (DEVICE_DISCONNECTED_C = −127 °C): celda vacía.
+//   - Sin ninguna sonda en el bus, iniciar() vuelve enseguida: un reset
+//     del bus sin pulso de presencia ya lo dice. DallasTemperature::begin()
+//     hace 3 intentos con delay(50) cuando no encuentra nada, y como el
+//     gestor reintenta iniciar() cada 30 s dentro del tic de 1000 ms, eran
+//     ~150 ms de bloqueo cada 30 s (§1.2). Se vio en el banco: loop_ms
+//     ~195 en cada reintento. Con sondas presentes begin() sigue costando
+//     ~50 ms, pero solo al arrancar o tras 5 lecturas fallidas.
 //
 // Mientras las ROM de config_teensy.h sigan en el centinela de ceros,
 // iniciar() escribe por Serial las ROM que encuentra en el bus, para
@@ -95,6 +102,9 @@ void lanzarConversion(uint32_t ahora) {
 }  // namespace
 
 bool iniciar() {
+  if (!bus.reset()) {
+    return false;  // nadie contestó con pulso de presencia: bus vacío
+  }
   sondas.begin();
   sondas.setResolution(COMETA_DS18B20_RESOLUCION_BITS);
   sondas.setWaitForConversion(false);

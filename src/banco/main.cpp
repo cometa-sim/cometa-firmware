@@ -10,7 +10,9 @@
 //   - al arrancar y cada DIAGNOSTICO_CADA_MS, escanea el bus I²C y
 //     compara con las direcciones esperadas de config_teensy.h (prueba 6
 //     en chico), y lee el registro de configuración de los dos MAX31865;
-//     se repite para no perderlo si el monitor se abre tarde;
+//     se repite para no perderlo si el monitor se abre tarde, junto con
+//     el bloqueo máximo de cada módulo en esos 10 s, contra el límite
+//     COMETA_BLOQUEO_MAX_MS de REQUISITOS.md §1.2;
 //   - inicia cada sensor con la misma regla de presencia/ausencia de
 //     src/teensy/main.cpp (REQUISITOS.md §1.3): un sensor que falta queda
 //     ausente y se reintenta cada COMETA_SENSOR_REINTENTO_MS, sin trabar
@@ -133,11 +135,14 @@ void diagnosticoMAX31865(uint8_t cs, const char *nombre) {
 
 const uint32_t DIAGNOSTICO_CADA_MS = 10000UL;
 
+void imprimirBloqueos();
+
 void imprimirDiagnostico() {
   escanearI2C();
   Serial.println("SPI:");
   diagnosticoMAX31865(COMETA_MAX31865_CS_ARM_PIN, "MAX31865 brazo");
   diagnosticoMAX31865(COMETA_MAX31865_CS_TUBO_PIN, "MAX31865 tubo");
+  imprimirBloqueos();
   Serial.println();
 }
 
@@ -186,6 +191,12 @@ EstadoSensor estadoICM20948 = {"ICM20948", SensorICM20948::iniciar,
                                 SensorICM20948::actualizar,
                                 SensorICM20948::llenarFila, false, 0, 0, 0};
 
+// Bloqueo más largo de cada llamada a actualizarSensor() (actualizar() o
+// el reintento de iniciar()) desde el último diagnóstico, en µs. Mismo
+// orden que sensores[]; el ICM-20948 aparte.
+uint32_t bloqueoMaxUs[NUM_SENSORES] = {};
+uint32_t bloqueoMaxICMUs = 0;
+
 void intentarIniciarSensor(EstadoSensor &s, uint32_t ahora) {
   s.reinit++;
   reinitTotal++;
@@ -213,6 +224,44 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
       s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
     }
   }
+}
+
+// Llama a actualizarSensor() y guarda en maxUs su duración si es la más
+// larga hasta ahora.
+void actualizarYMedir(EstadoSensor &s, uint32_t ahora, uint32_t &maxUs) {
+  const uint32_t inicio = micros();
+  actualizarSensor(s, ahora);
+  const uint32_t duracion = micros() - inicio;
+  if (duracion > maxUs) {
+    maxUs = duracion;
+  }
+}
+
+void imprimirBloqueo(const char *nombre, uint32_t &maxUs, uint32_t limiteUs) {
+  Serial.print("  ");
+  Serial.print(nombre);
+  Serial.print(": ");
+  Serial.print(maxUs / 1000.0, 1);
+  Serial.print(" ms");
+  if (maxUs > limiteUs) {
+    Serial.print("  <-- EXCEDE");
+  }
+  Serial.println();
+  maxUs = 0;
+}
+
+// Bloqueo máximo de cada módulo desde el último diagnóstico, y lo pone a
+// cero. Límite: COMETA_BLOQUEO_MAX_MS en el tic de 1000 ms. El ICM-20948
+// (tic de 10 ms) se muestra sin marcar: ahí no hay delay(), solo la
+// lectura I²C de ~23 bytes, y su límite real lo da la FIFO (§7).
+void imprimirBloqueos() {
+  Serial.print("Bloqueo maximo por modulo (limite ");
+  Serial.print(COMETA_BLOQUEO_MAX_MS);
+  Serial.println(" ms, REQUISITOS.md 1.2):");
+  for (size_t i = 0; i < NUM_SENSORES; i++) {
+    imprimirBloqueo(sensores[i].nombre, bloqueoMaxUs[i], COMETA_BLOQUEO_MAX_MS * 1000UL);
+  }
+  imprimirBloqueo("ICM20948 (tic 10 ms)", bloqueoMaxICMUs, UINT32_MAX);
 }
 
 // -----------------------------------------------------------------------
@@ -346,7 +395,7 @@ void loop() {
     if (ahora - ultimoTickIMU >= COMETA_TICK_IMU_MS) {
       ultimoTickIMU = ahora;
     }
-    actualizarSensor(estadoICM20948, ahora);
+    actualizarYMedir(estadoICM20948, ahora, bloqueoMaxICMUs);
   }
 
   if (ahora - ultimoTickSCI >= COMETA_TICK_SCI_MS) {
@@ -360,7 +409,7 @@ void loop() {
     filaSCI.t_ms = ahora;
 
     for (size_t i = 0; i < NUM_SENSORES; i++) {
-      actualizarSensor(sensores[i], ahora);
+      actualizarYMedir(sensores[i], ahora, bloqueoMaxUs[i]);
       if (sensores[i].presente) {
         sensores[i].llenarFila(filaSCI);
       }
