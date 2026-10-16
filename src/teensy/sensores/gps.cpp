@@ -10,12 +10,20 @@
 //     y el log escribe 6 decimales).
 //   - Se relee el modelo con getDynamicModel() para confirmar el modo
 //     Airborne (§3.1): airborneConfirmado() se lo da a META.
-//   - Sin setI2COutput(): en la librería v3 va por VALSET, que el M8 no
-//     entiende (§3.1); la salida I²C de fábrica ya incluye UBX. Sin
-//     saveConfiguration(): el modelo se envía en CADA arranque, así que
-//     no hace falta guardarlo.
-//   - getPVT() con espera acotada (COMETA_GPS_ESPERA_PVT_MS, §1.2): por
-//     defecto la librería espera hasta 1100 ms.
+//   - Librería u-blox GNSS v2, no v3: la v3 habla solo la interfaz de
+//     configuración nueva (VALGET/VALSET), que el M8 no entiende. Con
+//     ella begin() falla siempre (isConnected() pregunta por VALGET) y
+//     setDynamicModel() no llega nunca (§3.1). La v2 usa los mensajes
+//     legacy: CFG-PRT, CFG-NAV5, CFG-MSG. Se vio en el banco: 0x42
+//     contestaba en el escaneo I²C y el GPS seguía ausente.
+//   - setI2COutput(COM_TYPE_UBX): por I²C solo UBX, sin NMEA que leer y
+//     descartar en cada tic. Sin saveConfiguration(): esto y el modelo
+//     se envían en CADA arranque, así que no hace falta guardarlos.
+//   - Sin bloqueo (§1.2): setAutoPVT(true) y el receptor manda NAV-PVT
+//     solo, una vez por solución; getPVT() lee lo que haya llegado y
+//     vuelve enseguida. Pedirlo con un poll obligaba a esperar la
+//     respuesta en cada tic. Un tic sin NAV-PVT nuevo no es un fallo;
+//     sí lo es pasar COMETA_GPS_SIN_PVT_MAX_MS sin ninguno (§1.3).
 //   - Se agregan vz_ms, vn_ms, ve_ms, pdop y utc (§4.3).
 //   - Sin fix, la fila queda vacía (no lat = 0, lon = 0).
 //
@@ -24,7 +32,7 @@
 
 #include "gps.h"
 
-#include <SparkFun_u-blox_GNSS_v3.h>
+#include <SparkFun_u-blox_GNSS_Arduino_Library.h>
 #include <Wire.h>
 
 #include "config_teensy.h"
@@ -51,30 +59,40 @@ float pdop = NAN;
 float fix = NAN;
 char utc[COMETA_UTC_LARGO] = "";
 
+// Último NAV-PVT recibido: sin ninguno durante COMETA_GPS_SIN_PVT_MAX_MS,
+// lectura fallida (REQUISITOS.md §1.3).
+uint32_t ultimoPVTMs = 0;
+
 }  // namespace
 
 bool iniciar() {
   if (!gps.begin(Wire, COMETA_GPS_I2C_ADDR)) {
     return false;
   }
+  gps.setI2COutput(COM_TYPE_UBX);
   // Modo Airborne <1g: sin él, el receptor deja de dar fix por encima de
   // 12 km (REQUISITOS.md §3.1). Se envía en cada arranque y se relee.
   gps.setDynamicModel(DYN_MODEL_AIRBORNE1g);
   airborne = (gps.getDynamicModel() == DYN_MODEL_AIRBORNE1g);
+  if (!gps.setAutoPVT(true)) {
+    return false;  // sin NAV-PVT automático getPVT() no traería nada
+  }
+  ultimoPVTMs = millis();
   return true;
 }
 
 bool airborneConfirmado() { return airborne; }
 
 bool actualizar(uint32_t ahora) {
-  (void)ahora;
   datoNuevo = false;
 
-  // false = el receptor no contestó dentro de la espera: cuenta como
-  // lectura fallida para el gestor de ausencia (REQUISITOS.md §1.3).
-  if (!gps.getPVT(COMETA_GPS_ESPERA_PVT_MS)) {
-    return false;
+  // false = todavía no llegó un NAV-PVT nuevo. Normal en algún tic (el
+  // receptor y el tic van a 1 Hz cada uno, sin sincronía); fallo recién
+  // si pasa COMETA_GPS_SIN_PVT_MAX_MS sin ninguno (REQUISITOS.md §1.3).
+  if (!gps.getPVT()) {
+    return (ahora - ultimoPVTMs) < COMETA_GPS_SIN_PVT_MAX_MS;
   }
+  ultimoPVTMs = ahora;
 
   // El receptor contestó. Sin fix 3D (fixType 3) o con fix pero sin
   // gnssFixOK, la posición no vale: celdas vacías, no es un fallo.
