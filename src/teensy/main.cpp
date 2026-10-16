@@ -5,8 +5,9 @@
 // actualizar()/llenarFila(). main.cpp arma la fila SCI, recorre los
 // módulos con un gestor genérico (reintentos y ausencia, REQUISITOS.md
 // §1.3) y escribe el log. Los módulos de sensor están implementados;
-// las funciones de este archivo marcadas TODO
-// (SD, META, batería, flags, ventana IMU) siguen pendientes.
+// la SD (SCI_nnn.CSV con flush cada 10 filas, META_nnn.TXT) también.
+// Las funciones de este archivo marcadas TODO (reloj, recuperación I²C,
+// batería, flags, ventana IMU) siguen pendientes.
 
 #include <Arduino.h>
 #include <SD.h>
@@ -33,6 +34,17 @@
 File archivoSCI;
 File archivoIMU;
 File archivoMETA;
+
+// nnn de esta corrida, el mismo para SCI, META e IMU; -1 = sin SD (la
+// placa sigue midiendo, sin log).
+int numeroCorrida = -1;
+
+// Hash de Git del firmware para META (REQUISITOS.md §4.7). Lo pone el
+// build si lo define con -DCOMETA_GIT_HASH=\"...\"; compilado desde un
+// .zip no hay Git, y queda a la vista que no se sabe.
+#ifndef COMETA_GIT_HASH
+#define COMETA_GIT_HASH "desconocido"
+#endif
 
 // Fila SCI en construcción durante el tic de 1000 ms (REQUISITOS.md
 // §4.3). limpiarFilaSCI() la vacía al principio de cada tic; cada
@@ -61,22 +73,71 @@ void configurarRelojCPU() {
   // TODO
 }
 
+// "SCI_" + 7 + ".CSV" -> "SCI_007.CSV".
+void nombreArchivo(char *destino, size_t largo, const char *prefijo, int n,
+                   const char *extension) {
+  snprintf(destino, largo, "%s%03d%s", prefijo, n, extension);
+}
+
 // Monta la SD (BUILTIN_SDCARD) y busca el primer número nnn libre para
-// los archivos de esta corrida (REQUISITOS.md §4.1).
+// los archivos de esta corrida (REQUISITOS.md §4.1): libre = ni SCI_nnn
+// ni META_nnn existen, para que los dos de una corrida lleven el mismo
+// número. Sin SD, la placa sigue midiendo sin log.
 void inicializarSD() {
-  // TODO
+  if (!SD.begin(BUILTIN_SDCARD)) {
+    Serial.println("SD: no monta; se sigue sin log");
+    return;
+  }
+  char nombre[16];
+  for (int n = 0; n < COMETA_MAX_ARCHIVOS; n++) {
+    nombreArchivo(nombre, sizeof(nombre), COMETA_SCI_PREFIJO, n, COMETA_SCI_EXT);
+    if (SD.exists(nombre)) {
+      continue;
+    }
+    nombreArchivo(nombre, sizeof(nombre), COMETA_META_PREFIJO, n, COMETA_META_EXT);
+    if (SD.exists(nombre)) {
+      continue;
+    }
+    numeroCorrida = n;
+    return;
+  }
+  Serial.println("SD: no queda ningún nnn libre (000-999)");
+}
+
+// Crea <prefijo>nnn<extension> con el nnn de esta corrida. Un archivo
+// nuevo en cada arranque: si la alimentación se corta, el anterior queda
+// cerrado e intacto (REQUISITOS.md §4.1).
+bool crearArchivo(File &archivo, const char *prefijo, const char *extension) {
+  if (numeroCorrida < 0) {
+    return false;
+  }
+  char nombre[16];
+  nombreArchivo(nombre, sizeof(nombre), prefijo, numeroCorrida, extension);
+  archivo = SD.open(nombre, FILE_WRITE);
+  if (!archivo) {
+    Serial.print("SD: no se pudo crear ");
+    Serial.println(nombre);
+    return false;
+  }
+  Serial.print("SD: escribiendo en ");
+  Serial.println(nombre);
+  return true;
 }
 
 // Crea SCI_nnn.CSV y escribe su encabezado (REQUISITOS.md §4.1, §4.3).
 void abrirArchivoSCI() {
-  // TODO: crear el archivo con el primer nnn libre.
+  if (!crearArchivo(archivoSCI, COMETA_SCI_PREFIJO, COMETA_SCI_EXT)) {
+    return;
+  }
   escribirEncabezadoSCI(archivoSCI);
+  archivoSCI.flush();
 }
 
 // Crea META_nnn.TXT (datos que no cambian durante el vuelo,
-// REQUISITOS.md §4.1, §4.7).
+// REQUISITOS.md §4.1, §4.7). Queda abierto: el disparo de la ventana IMU
+// se agrega al final (§4.7).
 void abrirArchivoMETA() {
-  // TODO
+  crearArchivo(archivoMETA, COMETA_META_PREFIJO, COMETA_META_EXT);
 }
 
 // -----------------------------------------------------------------------
@@ -98,6 +159,9 @@ bool romEsCentinela(const uint8_t rom[8]) {
 // Escribe "CONFIG INCOMPLETA: <nombre>" en META por cada centinela sin
 // confirmar (los valores [VERIFICAR] no se inventan).
 void reportarConfigIncompleta(const char *nombre) {
+  if (!archivoMETA) {
+    return;
+  }
   archivoMETA.print("CONFIG INCOMPLETA: ");
   archivoMETA.println(nombre);
 }
@@ -317,8 +381,10 @@ void guardarVentanaIMU() {
     return;
   }
   // TODO: salir también mientras no haya disparo (verificarDisparoIMU()),
-  // y crear el archivo con el primer nnn libre.
-  escribirEncabezadoIMU(archivoIMU);
+  // y crear IMU_nnn.CSV con crearArchivo() y el nnn de esta corrida.
+  if (archivoIMU) {
+    escribirEncabezadoIMU(archivoIMU);
+  }
   ventanaIMUGuardada = true;
 }
 
@@ -328,7 +394,41 @@ void guardarVentanaIMU() {
 
 // flush() cada COMETA_FLUSH_CADA_N_MUESTRAS muestras (REQUISITOS.md §3.2).
 void flushLogSiCorresponde() {
-  // TODO
+  static uint32_t filasSinFlush = 0;
+  if (!archivoSCI) {
+    return;
+  }
+  if (++filasSinFlush >= COMETA_FLUSH_CADA_N_MUESTRAS) {
+    archivoSCI.flush();
+    filasSinFlush = 0;
+  }
+}
+
+void escribirHexMETA(uint8_t valor) {
+  archivoMETA.print("0x");
+  if (valor < 0x10) {
+    archivoMETA.print('0');
+  }
+  archivoMETA.print(valor, HEX);
+}
+
+void escribirROMMETA(const char *posicion, const uint8_t rom[8]) {
+  archivoMETA.print("ds18b20_");
+  archivoMETA.print(posicion);
+  archivoMETA.print(": ");
+  for (uint8_t i = 0; i < 8; i++) {
+    escribirHexMETA(rom[i]);
+    archivoMETA.print(i < 7 ? " " : "\n");
+  }
+}
+
+void escribirEstadoSensorMETA(const EstadoSensor &s) {
+  archivoMETA.print("sensor: ");
+  archivoMETA.print(s.nombre);
+  archivoMETA.print(" presente=");
+  archivoMETA.print(s.presente ? 1 : 0);
+  archivoMETA.print(" reinit=");
+  archivoMETA.println(s.reinit);
 }
 
 // Escribe en META_nnn.TXT: hash de Git, frecuencia de reloj, RREF/
@@ -343,8 +443,62 @@ void flushLogSiCorresponde() {
 // se está reiniciando, no cuál. El desglose por sensor es el que
 // contesta esa pregunta al analizar el vuelo (REQUISITOS.md §1.3, §4.7).
 void escribirMETA() {
-  // TODO: recorrer sensores[] y estadoICM20948 escribiendo nombre,
-  // presente y reinit de cada uno.
+  if (!archivoMETA) {
+    return;
+  }
+  archivoMETA.print("firmware_git: ");
+  archivoMETA.println(COMETA_GIT_HASH);
+  archivoMETA.print("cpu_hz: ");
+  archivoMETA.println(F_CPU_ACTUAL);
+  archivoMETA.print("max31865_rref_ohm: ");
+  archivoMETA.println(COMETA_MAX31865_RREF, 1);
+  archivoMETA.print("max31865_rnominal_ohm: ");
+  archivoMETA.println(COMETA_MAX31865_RNOMINAL, 1);
+
+  const uint8_t romCassa[8] = COMETA_DS18B20_ROM_CASSA;
+  const uint8_t romPile[8] = COMETA_DS18B20_ROM_PILE;
+  const uint8_t romCentro[8] = COMETA_DS18B20_ROM_CENTRO;
+  const uint8_t romScd[8] = COMETA_DS18B20_ROM_SCD;
+  escribirROMMETA("cassa", romCassa);
+  escribirROMMETA("pile", romPile);
+  escribirROMMETA("centro", romCentro);
+  escribirROMMETA("scd", romScd);
+
+  // Resultado del Airborne <1g en este arranque (§3.1). Sin GPS al
+  // arrancar no hubo a quién mandárselo.
+  archivoMETA.print("gps_airborne: ");
+  const EstadoSensor *gps = nullptr;
+  for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
+    if (strcmp(sensores[i].nombre, "GPS") == 0) {
+      gps = &sensores[i];
+    }
+  }
+  if (gps == nullptr || !gps->presente) {
+    archivoMETA.println("sin GPS al arrancar");
+  } else {
+    archivoMETA.println(SensorGPS::airborneConfirmado() ? "confirmado" : "NO confirmado");
+  }
+
+  // Direcciones I²C que contestan ahora (§4.7, prueba 6).
+  archivoMETA.print("i2c:");
+  for (uint8_t direccion = 0x08; direccion < 0x78; direccion++) {
+    Wire.beginTransmission(direccion);
+    if (Wire.endTransmission() == 0) {
+      archivoMETA.print(' ');
+      escribirHexMETA(direccion);
+    }
+  }
+  archivoMETA.println();
+
+  // TODO VERIFICAR: si el core expone la causa del último reinicio
+  // (REQUISITOS.md §3.11). Hasta saberlo, queda dicho que no se registra.
+  archivoMETA.println("causa_reinicio: [VERIFICAR]");
+
+  for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
+    escribirEstadoSensorMETA(sensores[i]);
+  }
+  escribirEstadoSensorMETA(estadoICM20948);
+  archivoMETA.flush();
 }
 
 // -----------------------------------------------------------------------
@@ -364,11 +518,16 @@ void setup() {
   // reinicios infinito y ni una fila de log.
   configurarWatchdog();
 
+  // Solo para mirar en el banco: sin esperar a que haya un monitor
+  // abierto. En vuelo nadie escucha y no cuesta nada.
+  Serial.begin(115200);
+
   configurarRelojCPU();
   wdt.feed();
   inicializarSD();
   wdt.feed();
   abrirArchivoSCI();
+  escribirEncabezadoSCI(Serial);  // para leer en el banco las filas que siguen
   wdt.feed();
   abrirArchivoMETA();
   wdt.feed();
@@ -474,7 +633,13 @@ void loop() {
     // trabajo de la pasada menos el escribirFilaSCI() que lo registra.
     filaSCI.loop_ms = (float)(millis() - inicioPasada);
 
-    escribirFilaSCI(archivoSCI, filaSCI);
-    flushLogSiCorresponde();
+    if (archivoSCI) {
+      escribirFilaSCI(archivoSCI, filaSCI);
+      flushLogSiCorresponde();
+    }
+    // La misma fila por USB, si hay un monitor abierto (banco).
+    if (Serial) {
+      escribirFilaSCI(Serial, filaSCI);
+    }
   }
 }
