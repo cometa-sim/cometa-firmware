@@ -7,8 +7,10 @@
 // lo que se ve acá es lo que el firmware de vuelo pondría en el log.
 //
 // Qué hace:
-//   - al arrancar, escanea el bus I²C y compara con las direcciones
-//     esperadas de config_teensy.h (prueba 6 en chico);
+//   - al arrancar y cada DIAGNOSTICO_CADA_MS, escanea el bus I²C y
+//     compara con las direcciones esperadas de config_teensy.h (prueba 6
+//     en chico), y lee el registro de configuración de los dos MAX31865;
+//     se repite para no perderlo si el monitor se abre tarde;
 //   - inicia cada sensor con la misma regla de presencia/ausencia de
 //     src/teensy/main.cpp (REQUISITOS.md §1.3): un sensor que falta queda
 //     ausente y se reintenta cada COMETA_SENSOR_REINTENTO_MS, sin trabar
@@ -21,6 +23,7 @@
 // Mirar la salida:    pio device monitor -e banco
 
 #include <Arduino.h>
+#include <SPI.h>
 #include <Wire.h>
 
 #include "config_teensy.h"
@@ -97,6 +100,44 @@ void escanearI2C() {
       Serial.println(direccionesEsperadas[i].nombre);
     }
   }
+  Serial.println();
+}
+
+// -----------------------------------------------------------------------
+// Diagnóstico del MAX31865: registro de configuración leído por SPI
+// -----------------------------------------------------------------------
+
+// Sensores/max31865.cpp da el chip por presente solo si relee 0xD1 (bias,
+// conversión continua, 3 hilos, 50 Hz). Si no, este valor dice por qué:
+// 0x00 o 0xFF = no hay respuesta en SDO (cable, alimentación, SDI/SDO
+// cruzados); otro valor = el chip contesta pero con otra configuración.
+uint8_t leerConfigMAX31865(uint8_t cs) {
+  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
+  digitalWrite(cs, LOW);
+  SPI.transfer(0x00);  // registro 0, lectura
+  const uint8_t valor = SPI.transfer(0xFF);
+  digitalWrite(cs, HIGH);
+  SPI.endTransaction();
+  return valor;
+}
+
+void diagnosticoMAX31865(uint8_t cs, const char *nombre) {
+  Serial.print("  ");
+  Serial.print(nombre);
+  Serial.print(" (CS ");
+  Serial.print(cs);
+  Serial.print("): config ");
+  imprimirHex(leerConfigMAX31865(cs));
+  Serial.println(", esperado 0xD1 (0x00 o 0xFF = no contesta)");
+}
+
+const uint32_t DIAGNOSTICO_CADA_MS = 10000UL;
+
+void imprimirDiagnostico() {
+  escanearI2C();
+  Serial.println("SPI:");
+  diagnosticoMAX31865(COMETA_MAX31865_CS_ARM_PIN, "MAX31865 brazo");
+  diagnosticoMAX31865(COMETA_MAX31865_CS_TUBO_PIN, "MAX31865 tubo");
   Serial.println();
 }
 
@@ -277,13 +318,16 @@ void setup() {
   Serial.println("==== COMETA · banco de prueba por USB ====");
 
   Wire.begin();  // 100 kHz, como en vuelo: el SCD30 no admite más
-  escanearI2C();
 
   for (size_t i = 0; i < NUM_SENSORES; i++) {
     intentarIniciarSensor(sensores[i], millis());
   }
   intentarIniciarSensor(estadoICM20948, millis());
   SensorGeiger::iniciar();
+
+  // Después de iniciar(): los MAX31865 ya tienen el CS como salida y el
+  // SPI arrancado por la librería.
+  imprimirDiagnostico();
 
   Serial.println("Sensores ausentes se reintentan cada 30 s.");
   Serial.println("PMS5003: las primeras 30 s tras encenderse se descartan.");
@@ -338,5 +382,11 @@ void loop() {
     imprimirEstados();
     imprimirFila(filaSCI);
     Serial.println();
+
+    static uint32_t ultimoDiagnosticoMs = 0;
+    if (ahora - ultimoDiagnosticoMs >= DIAGNOSTICO_CADA_MS) {
+      ultimoDiagnosticoMs = ahora;
+      imprimirDiagnostico();
+    }
   }
 }
