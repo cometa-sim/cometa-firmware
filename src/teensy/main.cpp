@@ -603,6 +603,21 @@ void guardarVentanaIMU(uint32_t ahora) {
 // cuántas filas lleva y cuántas faltan. Con la SD muda, es lo único que
 // dice si el problema es la tarjeta o el programa.
 void informarSDPorUSB() {
+  // Si la placa se reinicia, la SD puede quedar trabada a mitad de una
+  // escritura y no volver a montar: sin estas líneas, el reinicio no se
+  // ve en ningún lado. Se repiten cada 10 s porque tras un reinicio el
+  // monitor tarda unos segundos en reconectarse.
+  static uint32_t pasadas = 0;
+  if (pasadas++ % 10 == 0) {
+    Serial.print("# arranque hace ");
+    Serial.print(millis() / 1000);
+    Serial.print(" s; SD ");
+    Serial.println(numeroCorrida < 0 ? "NO montada" : "montada");
+    if (CrashReport) {
+      Serial.print("# causa del reinicio anterior: ");
+      Serial.print(CrashReport);
+    }
+  }
   if (numeroCorrida < 0) {
     return;
   }
@@ -740,9 +755,11 @@ void escribirMETA() {
   archivoMETA.print(" fixes=");
   archivoMETA.println(COMETA_IMU_DISPARO_VZ_FIXES);
 
-  // TODO VERIFICAR: si el core expone la causa del último reinicio
-  // (REQUISITOS.md §3.11). Hasta saberlo, queda dicho que no se registra.
-  archivoMETA.println("causa_reinicio: [VERIFICAR]");
+  // Causa del último reinicio (REQUISITOS.md §3.11): el core de Teensy 4
+  // guarda en CrashReport la falla (dirección, tipo) o el motivo del
+  // reinicio (watchdog, tensión baja, ...) y lo conserva tras el reinicio.
+  archivoMETA.println("causa_reinicio:");
+  archivoMETA.print(CrashReport);
 
   for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
     escribirEstadoSensorMETA(sensores[i]);
