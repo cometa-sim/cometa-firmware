@@ -629,7 +629,10 @@ void informarSDPorUSB() {
     Serial.print("# arranque hace ");
     Serial.print(millis() / 1000);
     Serial.print(" s; SD ");
-    Serial.println(numeroCorrida < 0 ? "NO montada" : "montada");
+    Serial.print(numeroCorrida < 0 ? "NO montada" : "montada");
+    Serial.print("; cpu_hz ");
+    Serial.print(F_CPU_ACTUAL);
+    Serial.println("; compilado " __DATE__ " " __TIME__);
     if (CrashReport) {
       Serial.print("# causa del reinicio anterior: ");
       Serial.print(CrashReport);
@@ -715,6 +718,10 @@ void escribirMETA() {
   }
   archivoMETA.print("firmware_git: ");
   archivoMETA.println(COMETA_GIT_HASH);
+  // Compilado desde un ZIP no hay hash: la fecha de compilación es lo que
+  // dice si en la placa quedó el firmware recién compilado o uno viejo.
+  archivoMETA.print("firmware_compilado: ");
+  archivoMETA.println(__DATE__ " " __TIME__);
   archivoMETA.print("cpu_hz: ");
   archivoMETA.println(F_CPU_ACTUAL);
   archivoMETA.print("max31865_rref_ohm: ");
