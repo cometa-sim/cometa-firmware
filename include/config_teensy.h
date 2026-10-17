@@ -71,9 +71,10 @@
 // cada 1-3 min y se llevaba con él al ICM-20948 y al LTR390; sin el GPS,
 // 17 min sin una sola recuperación. Con 1 va solo en Wire1 (SDA1 = 17,
 // SCL1 = 16, libres en §5): si se cuelga, se pierde solo el GPS y se
-// recupera su bus sin tocar los demás. Por defecto 0 hasta recablear.
+// recupera su bus sin tocar los demás; 19 min sin recuperaciones en el
+// banco (REQUISITOS.md §5). 0 solo para un GPS todavía en la cadena.
 #ifndef COMETA_GPS_EN_WIRE1
-#define COMETA_GPS_EN_WIRE1 0
+#define COMETA_GPS_EN_WIRE1 1
 #endif
 #if COMETA_GPS_EN_WIRE1
 #define COMETA_GPS_WIRE    Wire1
