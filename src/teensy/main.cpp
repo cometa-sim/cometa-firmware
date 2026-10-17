@@ -221,8 +221,8 @@ void verificarConfiguracion() {
 
 struct EstadoSensor {
   const char *nombre;
-  // Está en el bus I²C: una lectura fallida dispara la recuperación del
-  // bus (REQUISITOS.md §3.3).
+  // Está en el bus I²C: si pasa a ausente se intenta recuperar el bus
+  // (REQUISITOS.md §3.3).
   bool i2c;
   bool (*iniciar)();
   bool (*actualizar)(uint32_t);
