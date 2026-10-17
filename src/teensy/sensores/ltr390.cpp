@@ -80,7 +80,15 @@ bool actualizar(uint32_t ahora) {
   if (!ltr.newDataAvailable()) {
     return false;
   }
-  ultimoUVA = ltr.readUVS();
+  // Si la lectura I²C falla, Adafruit_BusIO devuelve 0xFFFFFFFF (y
+  // newDataAvailable() da true, porque lee ese mismo -1 como estado):
+  // en el banco quedaba en la fila como "ovf". El dato válido tiene a lo
+  // sumo 20 bits.
+  const uint32_t uvs = ltr.readUVS();
+  if (uvs > 0xFFFFFUL) {
+    return false;
+  }
+  ultimoUVA = uvs;
   datoNuevo = true;
   return true;
 }
