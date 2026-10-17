@@ -239,6 +239,11 @@
 // nnn va de 000 a 999: tres cifras para que el nombre siga siendo 8.3
 // ("META_nnn" son 8 caracteres).
 #define COMETA_MAX_ARCHIVOS 1000
+// Si la SD no montó al arrancar, cada cuánto se vuelve a intentar. Tras
+// un reinicio por watchdog la tarjeta no se queda sin alimentación y
+// puede seguir trabada unos segundos; o se insertó con la placa ya
+// encendida. Cada intento sin tarjeta tarda pocos ms.
+#define COMETA_SD_REINTENTO_MS 10000UL
 
 // -----------------------------------------------------------------------
 // §1.3 — Sensores que no responden: reintento de iniciar() y umbral de

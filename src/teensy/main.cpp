@@ -88,10 +88,13 @@ void nombreArchivo(char *destino, size_t largo, const char *prefijo, int n,
 // Monta la SD (BUILTIN_SDCARD) y busca el primer número nnn libre para
 // los archivos de esta corrida (REQUISITOS.md §4.1): libre = ni SCI_nnn
 // ni META_nnn existen, para que los dos de una corrida lleven el mismo
-// número. Sin SD, la placa sigue midiendo sin log.
+// número. Sin SD, la placa sigue midiendo sin log y reintentarSD() lo
+// vuelve a probar.
 void inicializarSD() {
   if (!SD.begin(BUILTIN_SDCARD)) {
-    Serial.println("SD: no monta; se sigue sin log");
+    Serial.print("# SD: no monta (codigo de error 0x");
+    Serial.print(SD.sdfs.sdErrorCode(), HEX);
+    Serial.println("); se sigue sin log y se reintenta cada 10 s");
     return;
   }
   char nombre[16];
@@ -786,6 +789,27 @@ void escribirMETA() {
 // setup() / loop()
 // -----------------------------------------------------------------------
 
+// Si la SD no montó al arrancar, cada COMETA_SD_REINTENTO_MS la vuelve a
+// montar y, si lo logra, crea SCI y META de esta corrida en ese momento:
+// se pierden solo las filas de antes, no toda la corrida.
+void reintentarSD(uint32_t ahora) {
+  static uint32_t ultimoIntentoMs = 0;
+  if (numeroCorrida >= 0 || ahora - ultimoIntentoMs < COMETA_SD_REINTENTO_MS) {
+    return;
+  }
+  ultimoIntentoMs = ahora;
+  inicializarSD();
+  if (numeroCorrida < 0) {
+    return;
+  }
+  Serial.print("# SD: montada a los ");
+  Serial.print(ahora / 1000);
+  Serial.println(" s del arranque");
+  abrirArchivoSCI();
+  abrirArchivoMETA();
+  escribirMETA();
+}
+
 void setup() {
   // El watchdog se arma lo primero de todo, antes de tocar nada: así
   // cubre también el arranque, que es donde más fácil es colgarse (una
@@ -922,6 +946,7 @@ void loop() {
       escribirFilaSCI(archivoSCI, filaSCI);
       flushLogSiCorresponde();
     }
+    reintentarSD(ahora);
     // La misma fila por USB, si hay un monitor abierto (banco).
     if (Serial) {
       escribirFilaSCI(Serial, filaSCI);
