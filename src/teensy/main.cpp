@@ -289,6 +289,10 @@ void intentarIniciarSensor(EstadoSensor &s, uint32_t ahora) {
   s.presente = s.iniciar();
   if (!s.presente) {
     s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
+  } else if (s.reinit > 1) {
+    Serial.print("# ");
+    Serial.print(s.nombre);
+    Serial.println(": presente de nuevo");
   }
 }
 
@@ -307,14 +311,21 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
   if (s.actualizar(ahora)) {
     s.fallosConsecutivos = 0;
   } else {
-    if (s.i2c) {
-      recuperarBusI2C();  // por si la lectura falló porque el bus quedó colgado
-    }
     s.fallosConsecutivos++;
     if (s.fallosConsecutivos >= COMETA_SENSOR_MAX_FALLOS) {
       s.presente = false;
       s.fallosConsecutivos = 0;
       s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
+      Serial.print("# ");
+      Serial.print(s.nombre);
+      Serial.println(": ausente tras 5 lecturas fallidas");
+      // Recién acá, no en cada lectura fallida: un fallo suelto no es un
+      // bus colgado, y reinicializar Wire por cada uno convertía un error
+      // aislado en una cascada (en el banco, todo el I2C muerto a los
+      // ~50 s).
+      if (s.i2c) {
+        recuperarBusI2C();
+      }
     }
   }
 }
@@ -330,12 +341,15 @@ uint32_t contadorRecuperacionesI2C = 0;
 // Si SDA quedó baja (un esclavo a mitad de un byte, típico de un corte
 // durante el clock stretching del SCD30): 9 pulsos en SCL para que
 // termine de sacarlo y suelte la línea, y se reinicia Wire
-// (REQUISITOS.md §3.3, §4.3). La llama el gestor cuando falla la lectura
-// de un sensor I²C, no cada vuelta de loop(). Si SDA está alta, solo se
-// reinicia Wire: no cuesta nada y no se cuenta.
+// (REQUISITOS.md §3.3, §4.3). La llama el gestor cuando un sensor I²C
+// pasa a ausente (5 lecturas fallidas seguidas), no en cada fallo. Para
+// leer SDA el pin pasa a GPIO, así que Wire.begin() se llama siempre al
+// final: es lo que le devuelve el pin al I²C. Wire.end() del core de
+// Teensy 4 está vacía, por eso no se llama.
 void recuperarBusI2C() {
-  Wire.end();
   pinMode(COMETA_I2C_SDA_PIN, INPUT_PULLUP);
+  Serial.print("# I2C: recuperacion, SDA ");
+  Serial.println(digitalRead(COMETA_I2C_SDA_PIN) == LOW ? "BAJA" : "alta");
   if (digitalRead(COMETA_I2C_SDA_PIN) == LOW) {
     pinMode(COMETA_I2C_SCL_PIN, OUTPUT);
     for (int i = 0; i < COMETA_I2C_RECOVERY_PULSOS_SCL; i++) {
