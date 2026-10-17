@@ -51,6 +51,23 @@ int numeroCorrida = -1;
 FilaSCI filaSCI;
 
 // -----------------------------------------------------------------------
+// Traza del arranque por USB (solo con -DCOMETA_TRAZA_ARRANQUE, en
+// teensy41_prueba_imu): una línea por paso de setup(), con flush, para
+// ver en el monitor en qué paso se cuelga o se cae la placa antes de
+// llegar a loop().
+#ifdef COMETA_TRAZA_ARRANQUE
+#define TRAZA(paso)                  \
+  do {                               \
+    Serial.print("# setup: ");       \
+    Serial.println(paso);            \
+    Serial.flush();                  \
+  } while (0)
+#else
+#define TRAZA(paso) \
+  do {              \
+  } while (0)
+#endif
+
 // Watchdog (REQUISITOS.md §3.11): WDT_T4, timeout COMETA_WATCHDOG_TIMEOUT_S.
 // Se alimenta una sola vez por pasada de loop(), nunca dentro de un
 // módulo de sensor.
@@ -863,26 +880,38 @@ void setup() {
   // Solo para mirar en el banco: sin esperar a que haya un monitor
   // abierto. En vuelo nadie escucha y no cuesta nada.
   Serial.begin(115200);
+#ifdef COMETA_TRAZA_ARRANQUE
+  // Hasta 3 s para que el monitor se conecte y no se pierda la traza.
+  while (!Serial && millis() < 3000) {
+  }
+#endif
+  TRAZA("reloj");
 
   configurarRelojCPU();
   analogReadResolution(COMETA_ADC_BITS);  // batería en A0 (REQUISITOS.md §3.10)
   wdt.feed();
+  TRAZA("SD");
   inicializarSD();
   wdt.feed();
+  TRAZA("SCI");
   abrirArchivoSCI();
   escribirEncabezadoSCI(Serial);  // para leer en el banco las filas que siguen
   wdt.feed();
+  TRAZA("META");
   abrirArchivoMETA();
   wdt.feed();
 
+  TRAZA("configuracion");
   verificarConfiguracion();
   wdt.feed();
 
   // Bus I²C (REQUISITOS.md §5: SDA 18, SCL 19). Las librerías de SparkFun
   // (GPS, SCD30, MS8607, ICM-20948) no lo arrancan solas. Queda a
   // 100 kHz, el valor por defecto: el SCD30 no admite más.
+  TRAZA("Wire");
   Wire.begin();
 #if COMETA_GPS_EN_WIRE1
+  TRAZA("Wire1");
   COMETA_GPS_WIRE.begin();  // el GPS solo, en su propio bus
 #endif
 
@@ -890,18 +919,23 @@ void setup() {
   // arranque puede durar varios segundos si hay varios ausentes, y cada
   // uno tiene que esperar 30 s desde su propio intento.
   for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
+    TRAZA(sensores[i].nombre);
     intentarIniciarSensor(sensores[i], millis());
     wdt.feed();
   }
+  TRAZA(estadoICM20948.nombre);
   intentarIniciarSensor(estadoICM20948, millis());
   wdt.feed();
 
   // El Geiger no pasa por la máquina de presencia/ausencia: es un pin
   // con una interrupción, iniciar() no puede fallar (REQUISITOS.md §1.3).
+  TRAZA("Geiger");
   SensorGeiger::iniciar();
   wdt.feed();
 
+  TRAZA("escribir META");
   escribirMETA();
+  TRAZA("fin");
 }
 
 void loop() {
