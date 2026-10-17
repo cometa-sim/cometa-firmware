@@ -5,9 +5,8 @@
 // actualizar()/llenarFila(). main.cpp arma la fila SCI, recorre los
 // módulos con un gestor genérico (reintentos y ausencia, REQUISITOS.md
 // §1.3) y escribe el log. Los módulos de sensor están implementados;
-// la SD (SCI_nnn.CSV con flush cada 10 filas, META_nnn.TXT) también.
-// Las funciones de este archivo marcadas TODO (reloj, recuperación I²C,
-// batería, flags, ventana IMU) siguen pendientes.
+// también la SD (SCI_nnn.CSV con flush cada 10 filas, META_nnn.TXT), el
+// reloj, la recuperación I²C, la batería, los flags y la ventana IMU.
 
 #include <Arduino.h>
 #include <SD.h>
@@ -52,6 +51,23 @@ int numeroCorrida = -1;
 FilaSCI filaSCI;
 
 // -----------------------------------------------------------------------
+// Traza del arranque por USB (solo con -DCOMETA_TRAZA_ARRANQUE, en
+// teensy41_prueba_imu): una línea por paso de setup(), con flush, para
+// ver en el monitor en qué paso se cuelga o se cae la placa antes de
+// llegar a loop().
+#ifdef COMETA_TRAZA_ARRANQUE
+#define TRAZA(paso)                  \
+  do {                               \
+    Serial.print("# setup: ");       \
+    Serial.println(paso);            \
+    Serial.flush();                  \
+  } while (0)
+#else
+#define TRAZA(paso) \
+  do {              \
+  } while (0)
+#endif
+
 // Watchdog (REQUISITOS.md §3.11): WDT_T4, timeout COMETA_WATCHDOG_TIMEOUT_S.
 // Se alimenta una sola vez por pasada de loop(), nunca dentro de un
 // módulo de sensor.
@@ -68,9 +84,16 @@ void configurarWatchdog() {
 // Reloj y arranque
 // -----------------------------------------------------------------------
 
-// Fija el reloj de la CPU a COMETA_CPU_CLOCK_HZ (REQUISITOS.md §3.8).
+// Del core de Teensy 4 (clockspeed.c): pone el reloj de la CPU en la
+// frecuencia alcanzable más cercana y actualiza F_CPU_ACTUAL, que es lo
+// que va a META como cpu_hz.
+extern "C" uint32_t set_arm_clock(uint32_t frequency);
+
+// Fija el reloj de la CPU a COMETA_CPU_CLOCK_HZ (REQUISITOS.md §3.8): a
+// 150 MHz consume bastante menos que a los 600 de fábrica, y el trabajo
+// del loop (sensores por I²C, SD) no depende de la CPU.
 void configurarRelojCPU() {
-  // TODO
+  set_arm_clock(COMETA_CPU_CLOCK_HZ);
 }
 
 // "SCI_" + 7 + ".CSV" -> "SCI_007.CSV".
@@ -82,10 +105,13 @@ void nombreArchivo(char *destino, size_t largo, const char *prefijo, int n,
 // Monta la SD (BUILTIN_SDCARD) y busca el primer número nnn libre para
 // los archivos de esta corrida (REQUISITOS.md §4.1): libre = ni SCI_nnn
 // ni META_nnn existen, para que los dos de una corrida lleven el mismo
-// número. Sin SD, la placa sigue midiendo sin log.
+// número. Sin SD, la placa sigue midiendo sin log y reintentarSD() lo
+// vuelve a probar.
 void inicializarSD() {
   if (!SD.begin(BUILTIN_SDCARD)) {
-    Serial.println("SD: no monta; se sigue sin log");
+    Serial.print("# SD: no monta (codigo de error 0x");
+    Serial.print(SD.sdfs.sdErrorCode(), HEX);
+    Serial.println("); se sigue sin log y se reintenta cada 10 s");
     return;
   }
   char nombre[16];
@@ -213,8 +239,29 @@ void verificarConfiguracion() {
 // intentos de iniciar() de todos los sensores.
 // -----------------------------------------------------------------------
 
+// Un bus I²C con sus pines, para que la recuperación sepa cuáles tomar
+// como GPIO.
+struct BusI2C {
+  TwoWire *wire;
+  uint8_t sda;
+  uint8_t scl;
+  const char *nombre;
+};
+
+BusI2C busPrincipal = {&Wire, COMETA_I2C_SDA_PIN, COMETA_I2C_SCL_PIN, "Wire"};
+#if COMETA_GPS_EN_WIRE1
+BusI2C busGPSPropio = {&COMETA_GPS_WIRE, COMETA_GPS_SDA_PIN, COMETA_GPS_SCL_PIN,
+                       "Wire1"};
+constexpr BusI2C *busGPS = &busGPSPropio;
+#else
+constexpr BusI2C *busGPS = &busPrincipal;
+#endif
+
 struct EstadoSensor {
   const char *nombre;
+  // Bus I²C del sensor (nullptr si no es I²C): si pasa a ausente se
+  // intenta recuperar ese bus (REQUISITOS.md §3.3).
+  BusI2C *bus;
   bool (*iniciar)();
   bool (*actualizar)(uint32_t);
   void (*llenarFila)(FilaSCI &);
@@ -238,32 +285,34 @@ uint32_t reinitTotal = 0;
 //     `false` accidental lo marcara ausente y dejara de leerse el
 //     contador, perdiendo cuentas en silencio. Se llama directo.
 EstadoSensor sensores[] = {
-    {"SCD30", SensorSCD30::iniciar, SensorSCD30::actualizar,
+    {"SCD30", &busPrincipal, SensorSCD30::iniciar, SensorSCD30::actualizar,
      SensorSCD30::llenarFila, false, 0, 0, 0},
-    {"MS8607", SensorMS8607::iniciar, SensorMS8607::actualizar,
+    {"MS8607", &busPrincipal, SensorMS8607::iniciar, SensorMS8607::actualizar,
      SensorMS8607::llenarFila, false, 0, 0, 0},
-    {"SHT45", SensorSHT45::iniciar, SensorSHT45::actualizar,
+    {"SHT45", &busPrincipal, SensorSHT45::iniciar, SensorSHT45::actualizar,
      SensorSHT45::llenarFila, false, 0, 0, 0},
-    {"LTR390", SensorLTR390::iniciar, SensorLTR390::actualizar,
+    {"LTR390", &busPrincipal, SensorLTR390::iniciar, SensorLTR390::actualizar,
      SensorLTR390::llenarFila, false, 0, 0, 0},
-    {"MAX31865_BRAZO", SensorPT1000Brazo::iniciar,
+    {"MAX31865_BRAZO", nullptr, SensorPT1000Brazo::iniciar,
      SensorPT1000Brazo::actualizar, SensorPT1000Brazo::llenarFila, false, 0,
      0, 0},
-    {"MAX31865_TUBO", SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
+    {"MAX31865_TUBO", nullptr, SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
      SensorPT1000Tubo::llenarFila, false, 0, 0, 0},
-    {"DS18B20", SensorDS18B20::iniciar, SensorDS18B20::actualizar,
+    {"DS18B20", nullptr, SensorDS18B20::iniciar, SensorDS18B20::actualizar,
      SensorDS18B20::llenarFila, false, 0, 0, 0},
-    {"PMS5003", SensorPMS5003::iniciar, SensorPMS5003::actualizar,
+    {"PMS5003", nullptr, SensorPMS5003::iniciar, SensorPMS5003::actualizar,
      SensorPMS5003::llenarFila, false, 0, 0, 0},
-    {"GPS", SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
+    {"GPS", busGPS, SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
      false, 0, 0, 0},
 };
 const size_t COMETA_NUM_SENSORES = sizeof(sensores) / sizeof(sensores[0]);
 
 // ICM-20948: mismo EstadoSensor, tic aparte (100 Hz).
-EstadoSensor estadoICM20948 = {"ICM20948", SensorICM20948::iniciar,
+EstadoSensor estadoICM20948 = {"ICM20948", &busPrincipal, SensorICM20948::iniciar,
                                 SensorICM20948::actualizar,
                                 SensorICM20948::llenarFila, false, 0, 0, 0};
+
+void recuperarBusI2C(BusI2C &bus);
 
 // Un intento de iniciar(): el primero al arrancar y cada reintento
 // posterior cuentan igual en reinit (REQUISITOS.md §1.3), para que
@@ -278,6 +327,10 @@ void intentarIniciarSensor(EstadoSensor &s, uint32_t ahora) {
   s.presente = s.iniciar();
   if (!s.presente) {
     s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
+  } else if (s.reinit > 1) {
+    Serial.print("# ");
+    Serial.print(s.nombre);
+    Serial.println(": presente de nuevo");
   }
 }
 
@@ -301,6 +354,16 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
       s.presente = false;
       s.fallosConsecutivos = 0;
       s.proximoReintentoMs = ahora + COMETA_SENSOR_REINTENTO_MS;
+      Serial.print("# ");
+      Serial.print(s.nombre);
+      Serial.println(": ausente tras 5 lecturas fallidas");
+      // Recién acá, no en cada lectura fallida: un fallo suelto no es un
+      // bus colgado, y reinicializar Wire por cada uno convertía un error
+      // aislado en una cascada (en el banco, todo el I2C muerto a los
+      // ~50 s).
+      if (s.bus != nullptr) {
+        recuperarBusI2C(*s.bus);
+      }
     }
   }
 }
@@ -310,16 +373,35 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
 // -----------------------------------------------------------------------
 
 // Cuenta las recuperaciones del bus (columna i2c_recov, REQUISITOS.md
-// §4.3). La incrementa recuperarBusI2C() cuando la implemente.
+// §4.3): las veces que SDA estaba de verdad baja, no las llamadas.
 uint32_t contadorRecuperacionesI2C = 0;
 
-// Si SDA queda baja: 9 pulsos en SCL y reinicializar; incrementar
-// contadorRecuperacionesI2C (REQUISITOS.md §3.3, §4.3). Se llama desde
-// los módulos de sensor I²C (actualizar() de scd30, ms8607, sht45,
-// ltr390, icm20948, gps) cuando detectan un error o timeout, no en cada
-// vuelta de loop().
-void recuperarBusI2C() {
-  // TODO
+// Si SDA quedó baja (un esclavo a mitad de un byte; en el banco, el GPS
+// SAM-M8Q cada 1-3 min): 9 pulsos en SCL para que termine de sacarlo y
+// suelte la línea, y se reinicia el bus
+// (REQUISITOS.md §3.3, §4.3). La llama el gestor cuando un sensor I²C
+// pasa a ausente (5 lecturas fallidas seguidas), no en cada fallo. Para
+// leer SDA el pin pasa a GPIO, así que begin() se llama siempre al
+// final: es lo que le devuelve el pin al I²C. Wire.end() del core de
+// Teensy 4 está vacía, por eso no se llama.
+void recuperarBusI2C(BusI2C &bus) {
+  pinMode(bus.sda, INPUT_PULLUP);
+  const bool sdaBaja = (digitalRead(bus.sda) == LOW);
+  Serial.print("# I2C: recuperacion de ");
+  Serial.print(bus.nombre);
+  Serial.print(", SDA ");
+  Serial.println(sdaBaja ? "BAJA" : "alta");
+  if (sdaBaja) {
+    pinMode(bus.scl, OUTPUT);
+    for (int i = 0; i < COMETA_I2C_RECOVERY_PULSOS_SCL; i++) {
+      digitalWrite(bus.scl, LOW);
+      delayMicroseconds(5);
+      digitalWrite(bus.scl, HIGH);
+      delayMicroseconds(5);
+    }
+    contadorRecuperacionesI2C++;
+  }
+  bus.wire->begin();
 }
 
 // -----------------------------------------------------------------------
@@ -329,9 +411,12 @@ void recuperarBusI2C() {
 // Lee v_batt por ADC (REQUISITOS.md §3.10). Vuelca en f, solo si hay un
 // dato nuevo: como los módulos de sensor, recibe la fila por referencia
 // y toca solo sus propios campos (REQUISITOS.md §1.2).
+// Sin el divisor conectado (en el banco, por USB) el pin queda al aire
+// y el valor no significa nada.
 void leerBateria(FilaSCI &f) {
-  (void)f;
-  // TODO
+  const int lectura = analogRead(COMETA_VBATT_ADC_PIN);
+  f.v_batt = lectura * (COMETA_ADC_VREF / ((1 << COMETA_ADC_BITS) - 1)) *
+             COMETA_VBATT_DIVISOR_FACTOR;
 }
 
 // -----------------------------------------------------------------------
@@ -343,49 +428,272 @@ void leerBateria(FilaSCI &f) {
 // descartan (REQUISITOS.md §3.7, §4.4). Se llama al final del tic, con
 // la fila ya completa, y recibe la fila por referencia como todo lo que
 // escribe datos (REQUISITOS.md §1.2).
+//
+// Sin el valor del que depende (celda vacía), el flag también queda
+// vacío: "no se sabe" no es "en especificación" (REQUISITOS.md §4.2).
+float flagBajoMinimo(float valor, float minimo) {
+  if (isnan(valor)) {
+    return NAN;
+  }
+  return valor < minimo ? 1 : 0;
+}
+
 void calcularFlagsCalidad(FilaSCI &f) {
-  (void)f;
-  // TODO
+  f.q_pms = flagBajoMinimo(f.t_arm_C, COMETA_Q_PMS_TEMP_ARM_MIN_C);
+  f.q_rh = flagBajoMinimo(f.t_sht_C, COMETA_Q_RH_TEMP_SHT_MIN_C);
+  f.q_arm = flagBajoMinimo(f.t_arm_C, COMETA_Q_ARM_TEMP_MIN_C);
+  f.q_tubo = flagBajoMinimo(f.t_tubo_C, COMETA_Q_TUBO_TEMP_MIN_C);
+  f.q_p = flagBajoMinimo(f.p_hPa, COMETA_Q_P_MIN_HPA);
 }
 
 // -----------------------------------------------------------------------
 // Ventana IMU alrededor del estallido (REQUISITOS.md §7)
 // -----------------------------------------------------------------------
 
-// Mantiene el buffer circular en RAM a 100 Hz (>= 30 s), siempre activo
-// (REQUISITOS.md §7).
-void actualizarBufferIMU() {
-  // TODO
+// Buffer circular en RAM, siempre activo, en binario (REQUISITOS.md §7):
+// COMETA_IMU_BUFFER_SEGUNDOS a COMETA_IMU_TASA_HZ, ~66 kB. Va en DMAMEM
+// (la segunda RAM del Teensy 4.1): no hace falta que sea la rápida.
+using SensorICM20948::MuestraIMU;
+const uint32_t CAPACIDAD_BUFFER_IMU = COMETA_IMU_BUFFER_SEGUNDOS * COMETA_IMU_TASA_HZ;
+DMAMEM MuestraIMU bufferIMU[CAPACIDAD_BUFFER_IMU];
+
+// Muestras metidas en el buffer desde el arranque. La muestra número n
+// está en bufferIMU[n % CAPACIDAD_BUFFER_IMU] mientras no la haya pisado
+// otra, es decir mientras n >= masViejaEnBufferIMU().
+uint32_t totalBufferIMU = 0;
+
+uint32_t masViejaEnBufferIMU() {
+  return totalBufferIMU > CAPACIDAD_BUFFER_IMU ? totalBufferIMU - CAPACIDAD_BUFFER_IMU : 0;
 }
 
-// Evalúa armado (altitud > 10 km, o p_hPa < 250 si el GPS no es válido) y
-// el disparo (caída libre |a| < 0.3 g >= 1 s, o respaldo GPS vz_ms < −10
-// durante 3 fixes). Una sola ventana, sin rearmado (REQUISITOS.md §7).
-// En el disparo, llamar también a SensorPMS5003::marcarDescenso() (§6).
-void verificarDisparoIMU() {
-  // TODO
-}
+// Una sola ventana, sin rearmado (§7): DESARMADA -> ARMADA -> GRABANDO
+// -> TERMINADA, y de ahí no se vuelve.
+enum EstadoVentanaIMU { VENTANA_DESARMADA, VENTANA_ARMADA, VENTANA_GRABANDO, VENTANA_TERMINADA };
+EstadoVentanaIMU estadoVentana = VENTANA_DESARMADA;
 
-// Hay una sola ventana, sin rearmado (REQUISITOS.md §7): una vez
-// guardada, esta función no vuelve a hacer nada. Sin esta guarda se
-// llamaría en cada tic de 10 ms y reescribiría el encabezado 100 veces
-// por segundo.
-bool ventanaIMUGuardada = false;
+uint32_t disparoMs = 0;
+uint32_t proximaAEscribir = 0;     // número de la próxima muestra para IMU_nnn.CSV
+uint32_t filasIMUEscritas = 0;
+uint32_t muestrasIMUPerdidas = 0;  // pisadas en el buffer antes de llegar al archivo
 
-// Recién en el disparo (no antes): crea IMU_nnn.CSV, escribe su
-// encabezado y vuelca la ventana (20 s antes, 90 s después) desde el
-// buffer circular; registra criterio, t_ms, UTC y altitud en META
-// (REQUISITOS.md §4.1, §4.6, §4.7, §7).
-void guardarVentanaIMU() {
-  if (ventanaIMUGuardada) {
-    return;
+// Caída libre en curso: |a| bajo el umbral, sin interrupción, desde
+// inicioCaidaLibreMs.
+bool enCaidaLibre = false;
+uint32_t inicioCaidaLibreMs = 0;
+uint8_t fixesBajando = 0;
+
+// Último UTC y última altitud conocidos, para META en el disparo (§4.7):
+// en la fila del disparo puede no haber fix.
+char ultimaUTC[COMETA_UTC_LARGO] = "";
+float ultimaAltitudM = NAN;
+
+// Dispara la ventana en t (§7): la grabación empieza por la muestra más
+// vieja del buffer que sea de los últimos COMETA_IMU_VENTANA_PRE_S, y
+// guardarVentanaIMU() la va escribiendo de a poco desde el tic de 10 ms.
+void dispararVentanaIMU(const char *criterio, uint32_t t) {
+  estadoVentana = VENTANA_GRABANDO;
+  disparoMs = t;
+  Serial.print("# IMU: disparo por ");
+  Serial.println(criterio);
+  SensorPMS5003::marcarDescenso();  // en bajada, el PMS5003 vuelve bajo 5 km (§6)
+
+  const uint32_t desdeMs = t - COMETA_IMU_VENTANA_PRE_S * 1000UL;
+  const uint32_t masVieja = masViejaEnBufferIMU();
+  proximaAEscribir = totalBufferIMU;
+  while (proximaAEscribir > masVieja &&
+         (int32_t)(bufferIMU[(proximaAEscribir - 1) % CAPACIDAD_BUFFER_IMU].t_ms - desdeMs) >= 0) {
+    proximaAEscribir--;
   }
-  // TODO: salir también mientras no haya disparo (verificarDisparoIMU()),
-  // y crear IMU_nnn.CSV con crearArchivo() y el nnn de esta corrida.
-  if (archivoIMU) {
+
+  if (crearArchivo(archivoIMU, COMETA_IMU_PREFIJO, COMETA_IMU_EXT)) {
     escribirEncabezadoIMU(archivoIMU);
   }
-  ventanaIMUGuardada = true;
+  if (archivoMETA) {
+    archivoMETA.print("imu_disparo: criterio=");
+    archivoMETA.print(criterio);
+    archivoMETA.print(" t_ms=");
+    archivoMETA.print(t);
+    archivoMETA.print(" utc=");
+    archivoMETA.print(ultimaUTC);
+    archivoMETA.print(" alt_m=");
+    if (!isnan(ultimaAltitudM)) {
+      archivoMETA.print(ultimaAltitudM, 1);
+    }
+    archivoMETA.println();
+    archivoMETA.flush();
+  }
+}
+
+// Mete en el buffer circular las muestras que el ICM-20948 leyó de su
+// FIFO en este tic, y con cada una evalúa la caída libre: |a| <
+// COMETA_IMU_DISPARO_CAIDA_LIBRE_G sostenido COMETA_IMU_DISPARO_CAIDA_LIBRE_MS
+// (§7). El disparo es el instante en que se cumple el criterio, como
+// dice §7; el estallido fue COMETA_IMU_DISPARO_CAIDA_LIBRE_MS antes, que
+// entra con holgura en los COMETA_IMU_VENTANA_PRE_S previos.
+void actualizarBufferIMU() {
+  const MuestraIMU *muestras;
+  const size_t n = SensorICM20948::tomarMuestras(&muestras);
+  for (size_t i = 0; i < n; i++) {
+    const MuestraIMU &m = muestras[i];
+    bufferIMU[totalBufferIMU % CAPACIDAD_BUFFER_IMU] = m;
+    totalBufferIMU++;
+
+    if (estadoVentana != VENTANA_ARMADA) {
+      continue;
+    }
+    if (SensorICM20948::moduloAceleracionG(m) >= COMETA_IMU_DISPARO_CAIDA_LIBRE_G) {
+      enCaidaLibre = false;
+      continue;
+    }
+    if (!enCaidaLibre) {
+      enCaidaLibre = true;
+      inicioCaidaLibreMs = m.t_ms;
+    } else if (m.t_ms - inicioCaidaLibreMs >= COMETA_IMU_DISPARO_CAIDA_LIBRE_MS) {
+      dispararVentanaIMU("caida_libre", m.t_ms);
+    }
+  }
+}
+
+// En el tic de 1000 ms, con la fila SCI ya completa: armado (altitud GPS
+// > COMETA_IMU_ARMADO_ALTITUD_M, o p_hPa < COMETA_IMU_ARMADO_PRESION_HPA
+// si no hay fix) y el disparo de respaldo por GPS (vz_ms <
+// COMETA_IMU_DISPARO_VZ_MS en COMETA_IMU_DISPARO_VZ_FIXES fixes
+// seguidos). Una fila sin fix no es un fix: ni suma ni corta la cuenta.
+void verificarDisparoIMU(const FilaSCI &f, uint32_t ahora) {
+  if (f.utc[0] != '\0') {
+    copiarUTC(ultimaUTC, f.utc);
+  }
+  if (!isnan(f.alt_m)) {
+    ultimaAltitudM = f.alt_m;
+  }
+
+  if (estadoVentana == VENTANA_DESARMADA) {
+    const bool porAltitud = !isnan(f.alt_m) && f.alt_m > COMETA_IMU_ARMADO_ALTITUD_M;
+    const bool porPresion =
+        isnan(f.alt_m) && !isnan(f.p_hPa) && f.p_hPa < COMETA_IMU_ARMADO_PRESION_HPA;
+    if (porAltitud || porPresion) {
+      estadoVentana = VENTANA_ARMADA;
+      Serial.println("# IMU: ventana armada");
+      if (archivoMETA) {
+        archivoMETA.print("imu_armado: criterio=");
+        archivoMETA.print(porAltitud ? "altitud" : "presion");
+        archivoMETA.print(" t_ms=");
+        archivoMETA.println(ahora);
+        archivoMETA.flush();
+      }
+    }
+    return;
+  }
+
+  if (estadoVentana != VENTANA_ARMADA || isnan(f.vz_ms)) {
+    return;
+  }
+  fixesBajando = (f.vz_ms < COMETA_IMU_DISPARO_VZ_MS) ? fixesBajando + 1 : 0;
+  if (fixesBajando >= COMETA_IMU_DISPARO_VZ_FIXES) {
+    dispararVentanaIMU("gps_vz", ahora);
+  }
+}
+
+void terminarVentanaIMU() {
+  estadoVentana = VENTANA_TERMINADA;
+  Serial.print("# IMU: ventana cerrada, filas=");
+  Serial.println(filasIMUEscritas);
+  if (archivoIMU) {
+    archivoIMU.close();
+  }
+  if (archivoMETA) {
+    archivoMETA.print("imu_ventana: filas=");
+    archivoMETA.print(filasIMUEscritas);
+    archivoMETA.print(" perdidas=");
+    archivoMETA.print(muestrasIMUPerdidas);
+    archivoMETA.print(" fifo_resincronizaciones=");
+    archivoMETA.println(SensorICM20948::resincronizaciones());
+    archivoMETA.flush();
+  }
+}
+
+// Después del disparo, en cada tic de 10 ms: escribe en IMU_nnn.CSV hasta
+// COMETA_IMU_FILAS_POR_TIC muestras del buffer, de la más vieja a la más
+// nueva, hasta COMETA_IMU_VENTANA_POST_S después del disparo
+// (REQUISITOS.md §4.6, §7). De a pocas para no bloquear el tic; como
+// escribe más filas de las que entran, alcanza a los 20 s previos en
+// unos segundos, mucho antes de que el buffer los pise.
+void guardarVentanaIMU(uint32_t ahora) {
+  if (estadoVentana != VENTANA_GRABANDO) {
+    return;
+  }
+  const uint32_t finMs = disparoMs + COMETA_IMU_VENTANA_POST_S * 1000UL;
+
+  const uint32_t masVieja = masViejaEnBufferIMU();
+  if (proximaAEscribir < masVieja) {
+    muestrasIMUPerdidas += masVieja - proximaAEscribir;
+    proximaAEscribir = masVieja;
+  }
+
+  for (uint8_t i = 0; i < COMETA_IMU_FILAS_POR_TIC && proximaAEscribir < totalBufferIMU; i++) {
+    const MuestraIMU &m = bufferIMU[proximaAEscribir % CAPACIDAD_BUFFER_IMU];
+    if ((int32_t)(m.t_ms - finMs) > 0) {
+      terminarVentanaIMU();
+      return;
+    }
+    if (archivoIMU) {
+      FilaIMU fila;
+      SensorICM20948::aFilaIMU(m, fila);
+      escribirFilaIMU(archivoIMU, fila);
+      if (++filasIMUEscritas % COMETA_IMU_FLUSH_CADA_N_FILAS == 0) {
+        archivoIMU.flush();
+      }
+    }
+    proximaAEscribir++;
+  }
+
+  // Sin IMU no llegan muestras que pasen finMs: se cierra por reloj.
+  if (proximaAEscribir == totalBufferIMU && (int32_t)(ahora - finMs) > 0) {
+    terminarVentanaIMU();
+  }
+}
+
+// Para el banco, por USB (líneas con '#', fuera del CSV): el código de
+// error de la tarjeta cuando cambia, y mientras se graba la ventana IMU,
+// cuántas filas lleva y cuántas faltan. Con la SD muda, es lo único que
+// dice si el problema es la tarjeta o el programa.
+void informarSDPorUSB() {
+  // Si la placa se reinicia, la SD puede quedar trabada a mitad de una
+  // escritura y no volver a montar: sin estas líneas, el reinicio no se
+  // ve en ningún lado. Se repiten cada 10 s porque tras un reinicio el
+  // monitor tarda unos segundos en reconectarse.
+  static uint32_t pasadas = 0;
+  if (pasadas++ % 10 == 0) {
+    Serial.print("# arranque hace ");
+    Serial.print(millis() / 1000);
+    Serial.print(" s; SD ");
+    Serial.print(numeroCorrida < 0 ? "NO montada" : "montada");
+    Serial.print("; cpu_hz ");
+    Serial.print(F_CPU_ACTUAL);
+    Serial.println("; compilado " __DATE__ " " __TIME__);
+    if (CrashReport) {
+      Serial.print("# causa del reinicio anterior: ");
+      Serial.print(CrashReport);
+    }
+  }
+  if (numeroCorrida < 0) {
+    return;
+  }
+  static uint8_t errorAnterior = 0;
+  const uint8_t error = SD.sdfs.sdErrorCode();
+  if (error != errorAnterior) {
+    errorAnterior = error;
+    Serial.print("# SD: codigo de error 0x");
+    Serial.print(error, HEX);
+    Serial.print(", dato 0x");
+    Serial.println(SD.sdfs.sdErrorData(), HEX);
+  }
+  if (estadoVentana == VENTANA_GRABANDO) {
+    Serial.print("# IMU: filas escritas ");
+    Serial.print(filasIMUEscritas);
+    Serial.print(", pendientes ");
+    Serial.println(totalBufferIMU - proximaAEscribir);
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -431,6 +739,18 @@ void escribirEstadoSensorMETA(const EstadoSensor &s) {
   archivoMETA.println(s.reinit);
 }
 
+// Direcciones que contestan en un bus, en la línea de META ya empezada.
+void escanearBusMETA(TwoWire &wire) {
+  for (uint8_t direccion = 0x08; direccion < 0x78; direccion++) {
+    wire.beginTransmission(direccion);
+    if (wire.endTransmission() == 0) {
+      archivoMETA.print(' ');
+      escribirHexMETA(direccion);
+    }
+  }
+  archivoMETA.println();
+}
+
 // Escribe en META_nnn.TXT: hash de Git, frecuencia de reloj, RREF/
 // RNOMINAL, ROM de cada DS18B20, resultado Airborne, direcciones I²C
 // detectadas, la causa del último reinicio si el core la expone (si no,
@@ -448,6 +768,10 @@ void escribirMETA() {
   }
   archivoMETA.print("firmware_git: ");
   archivoMETA.println(COMETA_GIT_HASH);
+  // Compilado desde un ZIP no hay hash: la fecha de compilación es lo que
+  // dice si en la placa quedó el firmware recién compilado o uno viejo.
+  archivoMETA.print("firmware_compilado: ");
+  archivoMETA.println(__DATE__ " " __TIME__);
   archivoMETA.print("cpu_hz: ");
   archivoMETA.println(F_CPU_ACTUAL);
   archivoMETA.print("max31865_rref_ohm: ");
@@ -481,18 +805,32 @@ void escribirMETA() {
 
   // Direcciones I²C que contestan ahora (§4.7, prueba 6).
   archivoMETA.print("i2c:");
-  for (uint8_t direccion = 0x08; direccion < 0x78; direccion++) {
-    Wire.beginTransmission(direccion);
-    if (Wire.endTransmission() == 0) {
-      archivoMETA.print(' ');
-      escribirHexMETA(direccion);
-    }
-  }
-  archivoMETA.println();
+  escanearBusMETA(Wire);
+#if COMETA_GPS_EN_WIRE1
+  archivoMETA.print("i2c_gps:");
+  escanearBusMETA(COMETA_GPS_WIRE);
+#endif
 
-  // TODO VERIFICAR: si el core expone la causa del último reinicio
-  // (REQUISITOS.md §3.11). Hasta saberlo, queda dicho que no se registra.
-  archivoMETA.println("causa_reinicio: [VERIFICAR]");
+  // Umbrales de la ventana IMU con los que se compiló (§7): dicen si lo
+  // que corre es el firmware de vuelo o el de prueba (teensy41_prueba_imu).
+  archivoMETA.print("imu_umbrales: armado_alt_m=");
+  archivoMETA.print(COMETA_IMU_ARMADO_ALTITUD_M, 1);
+  archivoMETA.print(" armado_p_hPa=");
+  archivoMETA.print(COMETA_IMU_ARMADO_PRESION_HPA, 1);
+  archivoMETA.print(" caida_g=");
+  archivoMETA.print(COMETA_IMU_DISPARO_CAIDA_LIBRE_G, 2);
+  archivoMETA.print(" caida_ms=");
+  archivoMETA.print(COMETA_IMU_DISPARO_CAIDA_LIBRE_MS);
+  archivoMETA.print(" vz_ms=");
+  archivoMETA.print(COMETA_IMU_DISPARO_VZ_MS, 1);
+  archivoMETA.print(" fixes=");
+  archivoMETA.println(COMETA_IMU_DISPARO_VZ_FIXES);
+
+  // Causa del último reinicio (REQUISITOS.md §3.11): el core de Teensy 4
+  // guarda en CrashReport la falla (dirección, tipo) o el motivo del
+  // reinicio (watchdog, tensión baja, ...) y lo conserva tras el reinicio.
+  archivoMETA.println("causa_reinicio:");
+  archivoMETA.print(CrashReport);
 
   for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
     escribirEstadoSensorMETA(sensores[i]);
@@ -504,6 +842,27 @@ void escribirMETA() {
 // -----------------------------------------------------------------------
 // setup() / loop()
 // -----------------------------------------------------------------------
+
+// Si la SD no montó al arrancar, cada COMETA_SD_REINTENTO_MS la vuelve a
+// montar y, si lo logra, crea SCI y META de esta corrida en ese momento:
+// se pierden solo las filas de antes, no toda la corrida.
+void reintentarSD(uint32_t ahora) {
+  static uint32_t ultimoIntentoMs = 0;
+  if (numeroCorrida >= 0 || ahora - ultimoIntentoMs < COMETA_SD_REINTENTO_MS) {
+    return;
+  }
+  ultimoIntentoMs = ahora;
+  inicializarSD();
+  if (numeroCorrida < 0) {
+    return;
+  }
+  Serial.print("# SD: montada a los ");
+  Serial.print(ahora / 1000);
+  Serial.println(" s del arranque");
+  abrirArchivoSCI();
+  abrirArchivoMETA();
+  escribirMETA();
+}
 
 void setup() {
   // El watchdog se arma lo primero de todo, antes de tocar nada: así
@@ -521,41 +880,62 @@ void setup() {
   // Solo para mirar en el banco: sin esperar a que haya un monitor
   // abierto. En vuelo nadie escucha y no cuesta nada.
   Serial.begin(115200);
+#ifdef COMETA_TRAZA_ARRANQUE
+  // Hasta 3 s para que el monitor se conecte y no se pierda la traza.
+  while (!Serial && millis() < 3000) {
+  }
+#endif
+  TRAZA("reloj");
 
   configurarRelojCPU();
+  analogReadResolution(COMETA_ADC_BITS);  // batería en A0 (REQUISITOS.md §3.10)
   wdt.feed();
+  TRAZA("SD");
   inicializarSD();
   wdt.feed();
+  TRAZA("SCI");
   abrirArchivoSCI();
   escribirEncabezadoSCI(Serial);  // para leer en el banco las filas que siguen
   wdt.feed();
+  TRAZA("META");
   abrirArchivoMETA();
   wdt.feed();
 
+  TRAZA("configuracion");
   verificarConfiguracion();
   wdt.feed();
 
   // Bus I²C (REQUISITOS.md §5: SDA 18, SCL 19). Las librerías de SparkFun
   // (GPS, SCD30, MS8607, ICM-20948) no lo arrancan solas. Queda a
   // 100 kHz, el valor por defecto: el SCD30 no admite más.
+  TRAZA("Wire");
   Wire.begin();
+#if COMETA_GPS_EN_WIRE1
+  TRAZA("Wire1");
+  COMETA_GPS_WIRE.begin();  // el GPS solo, en su propio bus
+#endif
 
   // millis() se relee por sensor, no una vez antes del bucle: el
   // arranque puede durar varios segundos si hay varios ausentes, y cada
   // uno tiene que esperar 30 s desde su propio intento.
   for (size_t i = 0; i < COMETA_NUM_SENSORES; i++) {
+    TRAZA(sensores[i].nombre);
     intentarIniciarSensor(sensores[i], millis());
     wdt.feed();
   }
+  TRAZA(estadoICM20948.nombre);
   intentarIniciarSensor(estadoICM20948, millis());
   wdt.feed();
 
   // El Geiger no pasa por la máquina de presencia/ausencia: es un pin
   // con una interrupción, iniciar() no puede fallar (REQUISITOS.md §1.3).
+  TRAZA("Geiger");
   SensorGeiger::iniciar();
   wdt.feed();
 
+  TRAZA("escribir META");
   escribirMETA();
+  TRAZA("fin");
 }
 
 void loop() {
@@ -577,8 +957,7 @@ void loop() {
 
     actualizarSensor(estadoICM20948, ahora);
     actualizarBufferIMU();
-    verificarDisparoIMU();
-    guardarVentanaIMU();
+    guardarVentanaIMU(ahora);
   }
 
   // Tick a 1 Hz (COMETA_TICK_SCI_MS): resto de sensores y log SCI
@@ -615,6 +994,10 @@ void loop() {
     SensorGeiger::actualizar(ahora);
     SensorGeiger::llenarFila(filaSCI);
 
+    // Armado y disparo de respaldo por GPS de la ventana IMU (§7), antes
+    // del PMS5003: el disparo le avisa que empezó la bajada (§6).
+    verificarDisparoIMU(filaSCI, ahora);
+
     // El PMS5003 no se enciende/apaga con el criterio genérico de
     // arriba: decide según altitud y T exterior, con histéresis
     // (REQUISITOS.md §6), no según si "responde".
@@ -637,9 +1020,11 @@ void loop() {
       escribirFilaSCI(archivoSCI, filaSCI);
       flushLogSiCorresponde();
     }
+    reintentarSD(ahora);
     // La misma fila por USB, si hay un monitor abierto (banco).
     if (Serial) {
       escribirFilaSCI(Serial, filaSCI);
+      informarSDPorUSB();
     }
   }
 }

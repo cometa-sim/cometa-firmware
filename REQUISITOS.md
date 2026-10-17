@@ -240,7 +240,7 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 |---|---|---|---|
 | SCD30 | I²C | 0x61 | clock stretching largo |
 | MS8607 | I²C | 0x76 + 0x40 | fondo de escala 10 hPa |
-| SAM-M8Q | I²C | 0x42 | en el Adalogger, otro 0x42 en otro bus |
+| SAM-M8Q | I²C (`Wire1`) | 0x42 | solo en su bus, ver abajo. En el Adalogger, otro 0x42 en otro bus |
 | SHT45 | I²C | 0x44 | en el brazo exterior |
 | ICM-20948 | I²C | **0x69** | breakout con AD0 alto, no 0x68. ±16 g, 100 Hz |
 | LTR390 | I²C | 0x53 | |
@@ -250,7 +250,7 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 | 4 × DS18B20 | 1-Wire | pin **2**, pull-up 4,7 kΩ | |
 | GGreg20 | interrupción | vía optoacoplador, pin **3** | |
 
-**I²C (Teensy).** SDA en pin **18**, SCL en pin **19** (bus por defecto de `Wire` en el Teensy 4.1).
+**I²C (Teensy).** SDA en pin **18**, SCL en pin **19** (bus por defecto de `Wire` en el Teensy 4.1) para todos los sensores I²C **menos el GPS**. El SAM-M8Q va **solo** en `Wire1`: SDA1 pin **17**, SCL1 pin **16**, sin ningún cable Qwiic hacia la cadena. En el banco, compartiendo el bus, dejaba SDA baja cada 1-3 min y se llevaba con él al ICM-20948 y al LTR390; en su propio bus, 19 min sin una sola recuperación (`COMETA_GPS_EN_WIRE1` en `config_teensy.h`).
 
 **MAX31865 — atención.** Los ejemplos de Adafruit son para PT100. Nuestras sondas son **PT1000**:
 

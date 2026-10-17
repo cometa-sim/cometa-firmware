@@ -262,6 +262,22 @@ void imprimirBloqueos() {
     imprimirBloqueo(sensores[i].nombre, bloqueoMaxUs[i], COMETA_BLOQUEO_MAX_MS * 1000UL);
   }
   imprimirBloqueo("ICM20948 (tic 10 ms)", bloqueoMaxICMUs, UINT32_MAX);
+
+  // Muestras leídas de la FIFO del ICM-20948 desde el último diagnóstico:
+  // a 100 Hz tienen que ser ~100 por segundo. Menos = se pierden; las
+  // resincronizaciones son FIFOs descartadas por desalineadas o llenas.
+  static uint32_t muestrasAntes = 0;
+  static uint32_t msAntes = 0;
+  const uint32_t muestras = SensorICM20948::muestrasTotales();
+  const uint32_t ms = millis();
+  if (ms != msAntes) {
+    Serial.print("IMU (FIFO): ");
+    Serial.print((muestras - muestrasAntes) * 1000.0 / (ms - msAntes), 1);
+    Serial.print(" muestras/s (esperado ~100), resincronizaciones: ");
+    Serial.println(SensorICM20948::resincronizaciones());
+  }
+  muestrasAntes = muestras;
+  msAntes = ms;
 }
 
 // -----------------------------------------------------------------------
@@ -369,6 +385,9 @@ void setup() {
   Serial.println("==== COMETA · banco de prueba por USB ====");
 
   Wire.begin();  // 100 kHz, como en vuelo: el SCD30 no admite más
+#if COMETA_GPS_EN_WIRE1
+  COMETA_GPS_WIRE.begin();  // el GPS solo, en su propio bus
+#endif
 
   for (size_t i = 0; i < NUM_SENSORES; i++) {
     intentarIniciarSensor(sensores[i], millis());
