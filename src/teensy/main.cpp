@@ -438,6 +438,8 @@ float ultimaAltitudM = NAN;
 void dispararVentanaIMU(const char *criterio, uint32_t t) {
   estadoVentana = VENTANA_GRABANDO;
   disparoMs = t;
+  Serial.print("# IMU: disparo por ");
+  Serial.println(criterio);
   SensorPMS5003::marcarDescenso();  // en bajada, el PMS5003 vuelve bajo 5 km (§6)
 
   const uint32_t desdeMs = t - COMETA_IMU_VENTANA_PRE_S * 1000UL;
@@ -516,6 +518,7 @@ void verificarDisparoIMU(const FilaSCI &f, uint32_t ahora) {
         isnan(f.alt_m) && !isnan(f.p_hPa) && f.p_hPa < COMETA_IMU_ARMADO_PRESION_HPA;
     if (porAltitud || porPresion) {
       estadoVentana = VENTANA_ARMADA;
+      Serial.println("# IMU: ventana armada");
       if (archivoMETA) {
         archivoMETA.print("imu_armado: criterio=");
         archivoMETA.print(porAltitud ? "altitud" : "presion");
@@ -538,6 +541,8 @@ void verificarDisparoIMU(const FilaSCI &f, uint32_t ahora) {
 
 void terminarVentanaIMU() {
   estadoVentana = VENTANA_TERMINADA;
+  Serial.print("# IMU: ventana cerrada, filas=");
+  Serial.println(filasIMUEscritas);
   if (archivoIMU) {
     archivoIMU.close();
   }
@@ -590,6 +595,31 @@ void guardarVentanaIMU(uint32_t ahora) {
   // Sin IMU no llegan muestras que pasen finMs: se cierra por reloj.
   if (proximaAEscribir == totalBufferIMU && (int32_t)(ahora - finMs) > 0) {
     terminarVentanaIMU();
+  }
+}
+
+// Para el banco, por USB (líneas con '#', fuera del CSV): el código de
+// error de la tarjeta cuando cambia, y mientras se graba la ventana IMU,
+// cuántas filas lleva y cuántas faltan. Con la SD muda, es lo único que
+// dice si el problema es la tarjeta o el programa.
+void informarSDPorUSB() {
+  if (numeroCorrida < 0) {
+    return;
+  }
+  static uint8_t errorAnterior = 0;
+  const uint8_t error = SD.sdfs.sdErrorCode();
+  if (error != errorAnterior) {
+    errorAnterior = error;
+    Serial.print("# SD: codigo de error 0x");
+    Serial.print(error, HEX);
+    Serial.print(", dato 0x");
+    Serial.println(SD.sdfs.sdErrorData(), HEX);
+  }
+  if (estadoVentana == VENTANA_GRABANDO) {
+    Serial.print("# IMU: filas escritas ");
+    Serial.print(filasIMUEscritas);
+    Serial.print(", pendientes ");
+    Serial.println(totalBufferIMU - proximaAEscribir);
   }
 }
 
@@ -694,6 +724,21 @@ void escribirMETA() {
     }
   }
   archivoMETA.println();
+
+  // Umbrales de la ventana IMU con los que se compiló (§7): dicen si lo
+  // que corre es el firmware de vuelo o el de prueba (teensy41_prueba_imu).
+  archivoMETA.print("imu_umbrales: armado_alt_m=");
+  archivoMETA.print(COMETA_IMU_ARMADO_ALTITUD_M, 1);
+  archivoMETA.print(" armado_p_hPa=");
+  archivoMETA.print(COMETA_IMU_ARMADO_PRESION_HPA, 1);
+  archivoMETA.print(" caida_g=");
+  archivoMETA.print(COMETA_IMU_DISPARO_CAIDA_LIBRE_G, 2);
+  archivoMETA.print(" caida_ms=");
+  archivoMETA.print(COMETA_IMU_DISPARO_CAIDA_LIBRE_MS);
+  archivoMETA.print(" vz_ms=");
+  archivoMETA.print(COMETA_IMU_DISPARO_VZ_MS, 1);
+  archivoMETA.print(" fixes=");
+  archivoMETA.println(COMETA_IMU_DISPARO_VZ_FIXES);
 
   // TODO VERIFICAR: si el core expone la causa del último reinicio
   // (REQUISITOS.md §3.11). Hasta saberlo, queda dicho que no se registra.
@@ -849,6 +894,7 @@ void loop() {
     // La misma fila por USB, si hay un monitor abierto (banco).
     if (Serial) {
       escribirFilaSCI(Serial, filaSCI);
+      informarSDPorUSB();
     }
   }
 }
