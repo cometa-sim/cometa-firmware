@@ -24,10 +24,10 @@
 // -----------------------------------------------------------------------
 // §1 — Estructura / reloj del sistema
 // -----------------------------------------------------------------------
-// Reloj del Teensy a 150 MHz (rango aceptable 150-300 MHz).
+// Reloj del Teensy a 150 MHz (rango aceptable 150-300 MHz). Se fija con
+// set_arm_clock() al arrancar; la frecuencia que de verdad quedó va a
+// META como cpu_hz (REQUISITOS.md §3.8): ahí se verifica.
 #define COMETA_CPU_CLOCK_HZ    150000000UL
-// TODO VERIFICAR: confirmar en el core instalado qué frecuencias acepta
-// set_arm_clock() (REQUISITOS.md §3.8).
 
 // -----------------------------------------------------------------------
 // §3.1 — GPS en modo Airborne <1g (SAM-M8Q, generación M8: CFG-NAV5 legacy,
@@ -63,6 +63,10 @@
 // §3.3 — Recuperación del bus I²C (9 pulsos en SCL si SDA queda baja)
 // -----------------------------------------------------------------------
 #define COMETA_I2C_RECOVERY_PULSOS_SCL 9
+// Bus Wire del Teensy 4.1 (REQUISITOS.md §5): la recuperación los toma
+// como GPIO mientras el bus está apagado.
+#define COMETA_I2C_SDA_PIN 18
+#define COMETA_I2C_SCL_PIN 19
 // TODO VERIFICAR con la prueba 13: timeout por encima del peor caso de
 // clock stretching del SCD30 (3 ms es insuficiente).
 #define COMETA_I2C_TIMEOUT_MS COMETA_MS_VERIFICAR
@@ -104,6 +108,15 @@
 // -----------------------------------------------------------------------
 #define COMETA_ICM20948_I2C_ADDR   0x69
 #define COMETA_ICM20948_RANGO_G    16
+#define COMETA_ICM20948_RANGO_DPS  2000
+// FIFO del chip (§7): acelerómetro y giróscopo, 12 bytes por muestra.
+// Con más de esto acumulado, o con un resto que no cierra en 12, la FIFO
+// se da por desalineada y se reinicia (se pierden esas muestras, se
+// cuenta en META).
+#define COMETA_ICM20948_FIFO_MAX_BYTES 480
+// El magnetómetro no entra en la FIFO: se relee cada tantos tics de
+// 10 ms (10 = 10 Hz) y cada muestra lleva el último valor.
+#define COMETA_ICM20948_MAG_CADA_N_TICS 10
 
 // -----------------------------------------------------------------------
 // §5 — LTR390 (I²C 0x53)
@@ -170,6 +183,9 @@
 // -----------------------------------------------------------------------
 #define COMETA_VBATT_ADC_PIN        A0
 #define COMETA_VBATT_DIVISOR_FACTOR 4.03
+// ADC del Teensy 4.1: referencia 3,3 V, lectura a 12 bits.
+#define COMETA_ADC_VREF 3.3
+#define COMETA_ADC_BITS 12
 
 // -----------------------------------------------------------------------
 // §4.4 — Flags de calidad (0 = en especificación, 1 = fuera)
@@ -182,18 +198,34 @@
 
 // -----------------------------------------------------------------------
 // §7 — Ventana IMU alrededor del estallido (umbrales aquí para poder
-// probarlos en tierra)
+// probarlos en tierra). Los de armado y disparo van con #ifndef: el
+// entorno teensy41_prueba_imu de platformio.ini los cambia por
+// build_flags para disparar la ventana en el banco, sin tocar este
+// archivo.
 // -----------------------------------------------------------------------
 #define COMETA_IMU_TASA_HZ                 100
 #define COMETA_IMU_BUFFER_SEGUNDOS         30
+#ifndef COMETA_IMU_ARMADO_ALTITUD_M
 #define COMETA_IMU_ARMADO_ALTITUD_M        10000.0
+#endif
+#ifndef COMETA_IMU_ARMADO_PRESION_HPA
 #define COMETA_IMU_ARMADO_PRESION_HPA      250.0
+#endif
+#ifndef COMETA_IMU_DISPARO_CAIDA_LIBRE_G
 #define COMETA_IMU_DISPARO_CAIDA_LIBRE_G   0.3
+#endif
+#ifndef COMETA_IMU_DISPARO_CAIDA_LIBRE_MS
 #define COMETA_IMU_DISPARO_CAIDA_LIBRE_MS  1000UL   // sostenido >= 1 s
+#endif
 #define COMETA_IMU_DISPARO_VZ_MS           (-10.0)
 #define COMETA_IMU_DISPARO_VZ_FIXES        3        // fixes consecutivos
 #define COMETA_IMU_VENTANA_PRE_S           20
 #define COMETA_IMU_VENTANA_POST_S          90
+// Filas de IMU_nnn.CSV escritas por tic de 10 ms después del disparo: más
+// que las que entran (1 por tic), para ponerse al día con los 20 s
+// previos (2000 filas en ~7 s) sin bloquear el tic.
+#define COMETA_IMU_FILAS_POR_TIC           4
+#define COMETA_IMU_FLUSH_CADA_N_FILAS      100
 
 // -----------------------------------------------------------------------
 // §4.1 — Archivos (SD BUILTIN_SDCARD, nombres 8.3 en mayúsculas, FAT16)

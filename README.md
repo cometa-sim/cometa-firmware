@@ -18,8 +18,14 @@ ejemplo. GPS, SCD30, MS8607, LTR390, MAX31865, DS18B20, ICM-20948,
 Geiger y PMS5003 están implementados a partir del banco de prueba de los estudiantes
 (`cometa-sim/COMETA-Teensy41`), corregidos para cumplir `REQUISITOS.md`;
 cada archivo dice al principio qué viene del banco de prueba y qué se
-cambió. Todavía falta probarlos en el banco uno por uno (§8). En el
-ICM-20948 falta la lectura por FIFO (§7).
+cambió. Todos menos el MAX31865 del tubo y los DS18B20 se probaron en el
+banco (entorno `banco`, ver abajo).
+
+El `main.cpp` del **Teensy** está completo: log `SCI_nnn.CSV` y
+`META_nnn.TXT` en la SD (probado en el banco), reloj a 150 MHz,
+recuperación del bus I²C, batería en A0, flags de calidad, y la ventana
+IMU del estallido con el ICM-20948 leído por FIFO (§7). La ventana se
+prueba en tierra con el entorno `teensy41_prueba_imu`.
 
 El **Adalogger** (`src/adalogger/main.cpp`) está completo: GPS SAM-M8Q en
 modo Airborne, `L2_nnn.CSV` nuevo en cada arranque con `flush()` cada 10
@@ -65,6 +71,7 @@ platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 | `teensy41` | Teensy 4.1 | todos los sensores científicos | `SCI_nnn.CSV`, `IMU_nnn.CSV`, `META_nnn.TXT` |
 | `adalogger` | Feather M0 Adalogger | posición y altitud de respaldo, telemetría E220 | `L2_nnn.CSV` |
 | `banco` | Teensy 4.1 | prueba de sensores por USB, sin SD ni watchdog | ninguno: todo por Serial |
+| `teensy41_prueba_imu` | Teensy 4.1 | el de vuelo, con la ventana IMU armada y disparada en tierra (no vuela) | los de `teensy41` |
 
 ## Valores pendientes de verificar
 
@@ -87,7 +94,8 @@ sin resolver porque tampoco se pueden fijar de antemano en una
 constante:
 
 - si `DYN_MODEL_AIRBORNE1g` se guarda en flash o solo en BBR (§3.1),
-- qué frecuencias acepta `set_arm_clock()` en el core instalado (§3.8),
+- qué frecuencia deja de verdad `set_arm_clock()` en el core instalado
+  (§3.8): se lee en `META` como `cpu_hz`,
 - si el core expone la **causa del último reinicio** para registrarla en
   `META`; si no la expone, queda documentado que no se registra (§3.11).
 
