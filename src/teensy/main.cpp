@@ -222,11 +222,29 @@ void verificarConfiguracion() {
 // intentos de iniciar() de todos los sensores.
 // -----------------------------------------------------------------------
 
+// Un bus I²C con sus pines, para que la recuperación sepa cuáles tomar
+// como GPIO.
+struct BusI2C {
+  TwoWire *wire;
+  uint8_t sda;
+  uint8_t scl;
+  const char *nombre;
+};
+
+BusI2C busPrincipal = {&Wire, COMETA_I2C_SDA_PIN, COMETA_I2C_SCL_PIN, "Wire"};
+#if COMETA_GPS_EN_WIRE1
+BusI2C busGPSPropio = {&COMETA_GPS_WIRE, COMETA_GPS_SDA_PIN, COMETA_GPS_SCL_PIN,
+                       "Wire1"};
+constexpr BusI2C *busGPS = &busGPSPropio;
+#else
+constexpr BusI2C *busGPS = &busPrincipal;
+#endif
+
 struct EstadoSensor {
   const char *nombre;
-  // Está en el bus I²C: si pasa a ausente se intenta recuperar el bus
-  // (REQUISITOS.md §3.3).
-  bool i2c;
+  // Bus I²C del sensor (nullptr si no es I²C): si pasa a ausente se
+  // intenta recuperar ese bus (REQUISITOS.md §3.3).
+  BusI2C *bus;
   bool (*iniciar)();
   bool (*actualizar)(uint32_t);
   void (*llenarFila)(FilaSCI &);
@@ -250,34 +268,34 @@ uint32_t reinitTotal = 0;
 //     `false` accidental lo marcara ausente y dejara de leerse el
 //     contador, perdiendo cuentas en silencio. Se llama directo.
 EstadoSensor sensores[] = {
-    {"SCD30", true, SensorSCD30::iniciar, SensorSCD30::actualizar,
+    {"SCD30", &busPrincipal, SensorSCD30::iniciar, SensorSCD30::actualizar,
      SensorSCD30::llenarFila, false, 0, 0, 0},
-    {"MS8607", true, SensorMS8607::iniciar, SensorMS8607::actualizar,
+    {"MS8607", &busPrincipal, SensorMS8607::iniciar, SensorMS8607::actualizar,
      SensorMS8607::llenarFila, false, 0, 0, 0},
-    {"SHT45", true, SensorSHT45::iniciar, SensorSHT45::actualizar,
+    {"SHT45", &busPrincipal, SensorSHT45::iniciar, SensorSHT45::actualizar,
      SensorSHT45::llenarFila, false, 0, 0, 0},
-    {"LTR390", true, SensorLTR390::iniciar, SensorLTR390::actualizar,
+    {"LTR390", &busPrincipal, SensorLTR390::iniciar, SensorLTR390::actualizar,
      SensorLTR390::llenarFila, false, 0, 0, 0},
-    {"MAX31865_BRAZO", false, SensorPT1000Brazo::iniciar,
+    {"MAX31865_BRAZO", nullptr, SensorPT1000Brazo::iniciar,
      SensorPT1000Brazo::actualizar, SensorPT1000Brazo::llenarFila, false, 0,
      0, 0},
-    {"MAX31865_TUBO", false, SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
+    {"MAX31865_TUBO", nullptr, SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
      SensorPT1000Tubo::llenarFila, false, 0, 0, 0},
-    {"DS18B20", false, SensorDS18B20::iniciar, SensorDS18B20::actualizar,
+    {"DS18B20", nullptr, SensorDS18B20::iniciar, SensorDS18B20::actualizar,
      SensorDS18B20::llenarFila, false, 0, 0, 0},
-    {"PMS5003", false, SensorPMS5003::iniciar, SensorPMS5003::actualizar,
+    {"PMS5003", nullptr, SensorPMS5003::iniciar, SensorPMS5003::actualizar,
      SensorPMS5003::llenarFila, false, 0, 0, 0},
-    {"GPS", true, SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
+    {"GPS", busGPS, SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
      false, 0, 0, 0},
 };
 const size_t COMETA_NUM_SENSORES = sizeof(sensores) / sizeof(sensores[0]);
 
 // ICM-20948: mismo EstadoSensor, tic aparte (100 Hz).
-EstadoSensor estadoICM20948 = {"ICM20948", true, SensorICM20948::iniciar,
+EstadoSensor estadoICM20948 = {"ICM20948", &busPrincipal, SensorICM20948::iniciar,
                                 SensorICM20948::actualizar,
                                 SensorICM20948::llenarFila, false, 0, 0, 0};
 
-void recuperarBusI2C();
+void recuperarBusI2C(BusI2C &bus);
 
 // Un intento de iniciar(): el primero al arrancar y cada reintento
 // posterior cuentan igual en reinit (REQUISITOS.md §1.3), para que
@@ -326,8 +344,8 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
       // bus colgado, y reinicializar Wire por cada uno convertía un error
       // aislado en una cascada (en el banco, todo el I2C muerto a los
       // ~50 s).
-      if (s.i2c) {
-        recuperarBusI2C();
+      if (s.bus != nullptr) {
+        recuperarBusI2C(*s.bus);
       }
     }
   }
@@ -341,29 +359,32 @@ void actualizarSensor(EstadoSensor &s, uint32_t ahora) {
 // §4.3): las veces que SDA estaba de verdad baja, no las llamadas.
 uint32_t contadorRecuperacionesI2C = 0;
 
-// Si SDA quedó baja (un esclavo a mitad de un byte, típico de un corte
-// durante el clock stretching del SCD30): 9 pulsos en SCL para que
-// termine de sacarlo y suelte la línea, y se reinicia Wire
+// Si SDA quedó baja (un esclavo a mitad de un byte; en el banco, el GPS
+// SAM-M8Q cada 1-3 min): 9 pulsos en SCL para que termine de sacarlo y
+// suelte la línea, y se reinicia el bus
 // (REQUISITOS.md §3.3, §4.3). La llama el gestor cuando un sensor I²C
 // pasa a ausente (5 lecturas fallidas seguidas), no en cada fallo. Para
-// leer SDA el pin pasa a GPIO, así que Wire.begin() se llama siempre al
+// leer SDA el pin pasa a GPIO, así que begin() se llama siempre al
 // final: es lo que le devuelve el pin al I²C. Wire.end() del core de
 // Teensy 4 está vacía, por eso no se llama.
-void recuperarBusI2C() {
-  pinMode(COMETA_I2C_SDA_PIN, INPUT_PULLUP);
-  Serial.print("# I2C: recuperacion, SDA ");
-  Serial.println(digitalRead(COMETA_I2C_SDA_PIN) == LOW ? "BAJA" : "alta");
-  if (digitalRead(COMETA_I2C_SDA_PIN) == LOW) {
-    pinMode(COMETA_I2C_SCL_PIN, OUTPUT);
+void recuperarBusI2C(BusI2C &bus) {
+  pinMode(bus.sda, INPUT_PULLUP);
+  const bool sdaBaja = (digitalRead(bus.sda) == LOW);
+  Serial.print("# I2C: recuperacion de ");
+  Serial.print(bus.nombre);
+  Serial.print(", SDA ");
+  Serial.println(sdaBaja ? "BAJA" : "alta");
+  if (sdaBaja) {
+    pinMode(bus.scl, OUTPUT);
     for (int i = 0; i < COMETA_I2C_RECOVERY_PULSOS_SCL; i++) {
-      digitalWrite(COMETA_I2C_SCL_PIN, LOW);
+      digitalWrite(bus.scl, LOW);
       delayMicroseconds(5);
-      digitalWrite(COMETA_I2C_SCL_PIN, HIGH);
+      digitalWrite(bus.scl, HIGH);
       delayMicroseconds(5);
     }
     contadorRecuperacionesI2C++;
   }
-  Wire.begin();
+  bus.wire->begin();
 }
 
 // -----------------------------------------------------------------------
@@ -701,6 +722,18 @@ void escribirEstadoSensorMETA(const EstadoSensor &s) {
   archivoMETA.println(s.reinit);
 }
 
+// Direcciones que contestan en un bus, en la línea de META ya empezada.
+void escanearBusMETA(TwoWire &wire) {
+  for (uint8_t direccion = 0x08; direccion < 0x78; direccion++) {
+    wire.beginTransmission(direccion);
+    if (wire.endTransmission() == 0) {
+      archivoMETA.print(' ');
+      escribirHexMETA(direccion);
+    }
+  }
+  archivoMETA.println();
+}
+
 // Escribe en META_nnn.TXT: hash de Git, frecuencia de reloj, RREF/
 // RNOMINAL, ROM de cada DS18B20, resultado Airborne, direcciones I²C
 // detectadas, la causa del último reinicio si el core la expone (si no,
@@ -755,14 +788,11 @@ void escribirMETA() {
 
   // Direcciones I²C que contestan ahora (§4.7, prueba 6).
   archivoMETA.print("i2c:");
-  for (uint8_t direccion = 0x08; direccion < 0x78; direccion++) {
-    Wire.beginTransmission(direccion);
-    if (Wire.endTransmission() == 0) {
-      archivoMETA.print(' ');
-      escribirHexMETA(direccion);
-    }
-  }
-  archivoMETA.println();
+  escanearBusMETA(Wire);
+#if COMETA_GPS_EN_WIRE1
+  archivoMETA.print("i2c_gps:");
+  escanearBusMETA(COMETA_GPS_WIRE);
+#endif
 
   // Umbrales de la ventana IMU con los que se compiló (§7): dicen si lo
   // que corre es el firmware de vuelo o el de prueba (teensy41_prueba_imu).
@@ -852,6 +882,9 @@ void setup() {
   // (GPS, SCD30, MS8607, ICM-20948) no lo arrancan solas. Queda a
   // 100 kHz, el valor por defecto: el SCD30 no admite más.
   Wire.begin();
+#if COMETA_GPS_EN_WIRE1
+  COMETA_GPS_WIRE.begin();  // el GPS solo, en su propio bus
+#endif
 
   // millis() se relee por sensor, no una vez antes del bucle: el
   // arranque puede durar varios segundos si hay varios ausentes, y cada

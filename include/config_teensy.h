@@ -67,6 +67,23 @@
 // como GPIO mientras el bus está apagado.
 #define COMETA_I2C_SDA_PIN 18
 #define COMETA_I2C_SCL_PIN 19
+// Bus del GPS. En el banco, el SAM-M8Q en el bus compartido dejó SDA baja
+// cada 1-3 min y se llevaba con él al ICM-20948 y al LTR390; sin el GPS,
+// 17 min sin una sola recuperación. Con 1 va solo en Wire1 (SDA1 = 17,
+// SCL1 = 16, libres en §5): si se cuelga, se pierde solo el GPS y se
+// recupera su bus sin tocar los demás. Por defecto 0 hasta recablear.
+#ifndef COMETA_GPS_EN_WIRE1
+#define COMETA_GPS_EN_WIRE1 0
+#endif
+#if COMETA_GPS_EN_WIRE1
+#define COMETA_GPS_WIRE    Wire1
+#define COMETA_GPS_SDA_PIN 17
+#define COMETA_GPS_SCL_PIN 16
+#else
+#define COMETA_GPS_WIRE    Wire
+#define COMETA_GPS_SDA_PIN COMETA_I2C_SDA_PIN
+#define COMETA_GPS_SCL_PIN COMETA_I2C_SCL_PIN
+#endif
 // TODO VERIFICAR con la prueba 13: timeout por encima del peor caso de
 // clock stretching del SCD30 (3 ms es insuficiente).
 #define COMETA_I2C_TIMEOUT_MS COMETA_MS_VERIFICAR

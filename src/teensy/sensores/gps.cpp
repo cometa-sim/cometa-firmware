@@ -66,7 +66,7 @@ uint32_t ultimoPVTMs = 0;
 }  // namespace
 
 bool iniciar() {
-  if (!gps.begin(Wire, COMETA_GPS_I2C_ADDR)) {
+  if (!gps.begin(COMETA_GPS_WIRE, COMETA_GPS_I2C_ADDR)) {
     return false;
   }
   gps.setI2COutput(COM_TYPE_UBX);

@@ -35,3 +35,11 @@ jobs:
 
       - name: Build ${{ matrix.environment }}
         run: pio run -e ${{ matrix.environment }}
+
+      # El GPS en su propio bus (COMETA_GPS_EN_WIRE1) no es el valor por
+      # defecto: sin este paso esa variante no la compilaría nadie.
+      - name: Build teensy41 con el GPS en Wire1
+        if: matrix.environment == 'teensy41'
+        run: pio run -e teensy41
+        env:
+          PLATFORMIO_BUILD_FLAGS: -DCOMETA_GPS_EN_WIRE1=1

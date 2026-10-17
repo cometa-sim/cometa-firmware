@@ -385,6 +385,9 @@ void setup() {
   Serial.println("==== COMETA · banco de prueba por USB ====");
 
   Wire.begin();  // 100 kHz, como en vuelo: el SCD30 no admite más
+#if COMETA_GPS_EN_WIRE1
+  COMETA_GPS_WIRE.begin();  // el GPS solo, en su propio bus
+#endif
 
   for (size_t i = 0; i < NUM_SENSORES; i++) {
     intentarIniciarSensor(sensores[i], millis());
