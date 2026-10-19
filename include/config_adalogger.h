@@ -101,6 +101,14 @@
 #define COMETA_VBATT_MUESTRAS 8
 
 // -----------------------------------------------------------------------
+// §3.11 — Línea "ESTADO:" por Serial cada tanto: lo que setup() informa
+// una sola vez (modo Airborne, causa del reinicio, archivo de la SD) se
+// pierde si el monitor serie se abre después del arranque, que es lo de
+// siempre con el USB nativo del Feather M0. Esta placa no tiene META.
+// -----------------------------------------------------------------------
+#define COMETA_ESTADO_PERIODO_MS 10000UL
+
+// -----------------------------------------------------------------------
 // §2.2 — Telemetría por radio: E220 (LoRa 920 MHz) en Serial1, TX (D1)
 // -> RXD, RX (D0) <- TXD. M0 y M1 a GND: modo normal (transparente); la
 // configuración del módulo (canal, velocidad de aire, potencia) se hace

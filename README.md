@@ -122,9 +122,11 @@ pio run -e adalogger -t upload && pio device monitor -e adalogger
 
 Al arrancar salen el periodo real del watchdog, la causa del reinicio,
 el archivo de la SD (`SD: escribiendo en L2_nnn.CSV`) y el resultado del
-modo Airborne. Después, una línea `L2: ...` por segundo (la misma fila
-que va a la SD) y una `RADIO: ...` cada 5 s (la trama que sale por el
-E220). Sin PC: cada segundo destella el LED verde si la SD graba, el
+modo Airborne, pero salen antes de que el monitor se conecte y casi
+siempre se pierden: lo mismo se repite cada 10 s en una línea
+`ESTADO: gps=si airborne=si sd=L2_nnn.CSV i2c_recov=0 reinicio=...`.
+Además, una línea `L2: ...` por segundo (la misma fila que va a la SD)
+y una `RADIO: ...` cada 5 s (la trama que sale por el E220). Sin PC: cada segundo destella el LED verde si la SD graba, el
 rojo si no (`REQUISITOS.md` §2.3). Para ver las tramas por radio, un
 segundo E220 con la misma configuración en un adaptador USB-serie, a
 9600 baudios, en cualquier terminal serie.

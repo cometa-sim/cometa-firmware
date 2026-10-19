@@ -67,7 +67,10 @@ void configurarWatchdog() {
 // Causa del último reinicio (REQUISITOS.md §3.11): el registro RCAUSE del
 // SAMD21, que expone resetCause(). Un reinicio en vuelo se ve en la SD
 // como un L2_nnn.CSV nuevo y en tierra como n que vuelve a 0; esto dice
-// por qué. Va por Serial: esta placa no tiene META.
+// por qué. Va por Serial: esta placa no tiene META; se repite en la línea
+// ESTADO (reportarEstado()).
+const char *causaReinicio = "desconocida";
+
 void reportarCausaReinicio() {
   const uint8_t causa = Watchdog.resetCause();
   const char *nombre = "desconocida";
@@ -82,6 +85,7 @@ void reportarCausaReinicio() {
   } else if (causa & PM_RCAUSE_POR) {
     nombre = "encendido";
   }
+  causaReinicio = nombre;
   Serial.print("ARRANQUE: causa del reinicio = ");
   Serial.print(nombre);
   Serial.print(" (RCAUSE 0x");
@@ -284,6 +288,9 @@ void recuperarBusI2C() {
 // -----------------------------------------------------------------------
 SFE_UBLOX_GNSS gps;
 bool gpsPresente = false;
+// Resultado de la relectura del modelo en la última inicialización
+// (REQUISITOS.md §3.1), para la línea ESTADO.
+bool gpsAirborne = false;
 uint32_t proximoReintentoGPSMs = 0;
 uint32_t ultimoPVTMs = 0;
 bool huboPVTDesdeInicio = false;
@@ -304,6 +311,7 @@ void inicializarGPS() {
   gps.setI2COutput(COM_TYPE_UBX);
   gps.setDynamicModel(DYN_MODEL_AIRBORNE1g);
   const bool airborne = (gps.getDynamicModel() == DYN_MODEL_AIRBORNE1g);
+  gpsAirborne = airborne;
   Serial.println(airborne ? "GPS: modo Airborne <1g confirmado"
                           : "GPS: el modo Airborne <1g NO quedó (REQUISITOS.md §3.1)");
   if (!gps.setAutoPVT(true)) {
@@ -466,6 +474,35 @@ void enviarTramaRadio(const FilaL2 &f, uint32_t ahora) {
 }
 
 // -----------------------------------------------------------------------
+// Línea de estado por Serial (COMETA_ESTADO_PERIODO_MS)
+// -----------------------------------------------------------------------
+
+// Repite cada COMETA_ESTADO_PERIODO_MS lo que setup() informa una sola
+// vez: con el USB nativo del Feather M0, esas líneas salen antes de que
+// el monitor serie se conecte y se pierden. Ejemplo:
+//   ESTADO: gps=si airborne=si sd=L2_003.CSV i2c_recov=0 reinicio=encendido
+void reportarEstado(uint32_t ahora) {
+  static bool primera = true;
+  static uint32_t ultimoEstadoMs = 0;
+  if (!primera && ahora - ultimoEstadoMs < COMETA_ESTADO_PERIODO_MS) {
+    return;
+  }
+  primera = false;
+  ultimoEstadoMs = ahora;
+
+  Serial.print("ESTADO: gps=");
+  Serial.print(gpsPresente ? "si" : "no");
+  Serial.print(" airborne=");
+  Serial.print(gpsPresente ? (gpsAirborne ? "si" : "NO") : "-");
+  Serial.print(" sd=");
+  Serial.print(archivoL2 ? nombreL2 : "no");
+  Serial.print(" i2c_recov=");
+  Serial.print(recuperacionesI2C);
+  Serial.print(" reinicio=");
+  Serial.println(causaReinicio);
+}
+
+// -----------------------------------------------------------------------
 // setup() / loop()
 // -----------------------------------------------------------------------
 
@@ -534,5 +571,6 @@ void loop() {
 
     // Al final: un SD.begin() sin tarjeta tarda y no atrasa la trama.
     reintentarSDSiCorresponde(ahora);
+    reportarEstado(ahora);
   }
 }
