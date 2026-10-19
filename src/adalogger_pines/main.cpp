@@ -9,7 +9,7 @@
 // manda corriente a la PC), mirar el monitor mientras se prende y se
 // apaga el interruptor del pack. El pin del divisor pasa de la mitad del
 // pack (~2,35 V con 3 alcalinas) a 0 V; un pin sin nada conectado da
-// valores que saltan y no siguen al interruptor. Debería ser A1
+// valores que saltan y no siguen al interruptor. Debería ser A2
 // (COMETA_VBATT_ADC_PIN).
 //
 //   pio run -e adalogger_pines -t upload && pio device monitor -e adalogger_pines
