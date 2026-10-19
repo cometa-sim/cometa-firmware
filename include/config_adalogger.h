@@ -28,10 +28,14 @@
 // CFG-NAV5 legacy, NO setVal/VALSET)
 // -----------------------------------------------------------------------
 #define COMETA_GPS_I2C_ADDR 0x42
-// Espera máxima de getPVT() en cada tic: la librería espera hasta
-// 1100 ms por defecto y el tic es de 1000 ms.
-#define COMETA_GPS_ESPERA_PVT_MS 250
-// Si el GPS no respondió al arrancar, se reintenta begin() cada tanto.
+// NAV-PVT llega solo (setAutoPVT), una vez por segundo, y getPVT() no
+// espera: lee lo que haya llegado. Un tic sin NAV-PVT nuevo es normal
+// (el receptor y el tic van a 1 Hz cada uno, sin sincronía); pasar esto
+// sin ninguno no: se recupera el bus y se reinicializa el GPS, que
+// vuelve a recibir el modo Airborne (REQUISITOS.md §3.1, §3.3). Mismo
+// valor que en el Teensy.
+#define COMETA_GPS_SIN_PVT_MAX_MS 3000UL
+// Si la reinicialización falla, begin() se reintenta cada tanto.
 #define COMETA_GPS_REINTENTO_MS 30000UL
 // TODO VERIFICAR: ¿DYN_MODEL_AIRBORNE1g se guarda en flash o solo en BBR?
 // (REQUISITOS.md §3.1). Se decide al implementar inicializarGPS(): no es
@@ -61,6 +65,23 @@
 // §2 — SD: chip select pin 4
 // -----------------------------------------------------------------------
 #define COMETA_SD_CS_PIN 4
+// Si la SD no monta al arrancar, o una escritura falla en vuelo, se
+// vuelve a montar cada tanto y se sigue en un L2_nnn.CSV nuevo
+// (REQUISITOS.md §4.1). SD.begin() con la tarjeta ausente tarda hasta
+// ~2 s: no se intenta en cada tic.
+#define COMETA_SD_REINTENTO_MS 30000UL
+
+// -----------------------------------------------------------------------
+// §2 — LEDs de estado de la placa, para revisar la sonda antes de
+// cerrarla sin conectar la PC: en cada tic destella UNO de los dos.
+// Verde (pin 8, junto a la ranura de la SD) = la fila se escribió en la
+// SD; rojo (pin 13) = la SD no está grabando.
+// -----------------------------------------------------------------------
+#define COMETA_LED_SD_OK_PIN    8
+#define COMETA_LED_SD_ERROR_PIN LED_BUILTIN
+// Duración del destello: unos 2 mA durante 30 ms por segundo, ~0,06 mA
+// de promedio.
+#define COMETA_LED_DESTELLO_MS  30UL
 
 // -----------------------------------------------------------------------
 // §2.1, §3.10 — Tensión de batería por ADC. El pack se conecta por el pin
@@ -75,6 +96,9 @@
 // ADC del SAMD21: referencia 3,3 V, lectura a 12 bits.
 #define COMETA_ADC_VREF 3.3
 #define COMETA_ADC_BITS 12
+// Lecturas promediadas por fila: el ruido del ADC y los picos de consumo
+// del E220 al transmitir mueven la última cifra de v_batt.
+#define COMETA_VBATT_MUESTRAS 8
 
 // -----------------------------------------------------------------------
 // §2.2 — Telemetría por radio: E220 (LoRa 920 MHz) en Serial1, TX (D1)
