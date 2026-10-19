@@ -28,8 +28,12 @@ IMU del estallido con el ICM-20948 leído por FIFO (§7). La ventana se
 prueba en tierra con el entorno `teensy41_prueba_imu`.
 
 El **Adalogger** (`src/adalogger/main.cpp`) está completo: GPS SAM-M8Q en
-modo Airborne, `L2_nnn.CSV` nuevo en cada arranque con `flush()` cada 10
-filas, batería en A1 y trama de radio por el E220 cada 5 s (§2.2).
+modo Airborne con NAV-PVT automático (como el del Teensy), `L2_nnn.CSV`
+nuevo en cada arranque con `flush()` cada 10 filas, batería en A1 y
+trama de radio por el E220 cada 5 s (§2.2). Cada parte sigue sola si
+otra falla: el GPS se reinicializa si deja de mandar datos, la SD se
+vuelve a montar si una escritura falla, y dos LEDs dicen si está
+grabando (§2.3). Cómo leer la trama en tierra: §2.2.
 
 Dos cosas antes de escribir un módulo:
 
@@ -106,6 +110,24 @@ pio run                  # compila ambos entornos
 pio run -e teensy41       # solo el Teensy 4.1
 pio run -e adalogger       # solo el Feather M0 Adalogger
 ```
+
+## Probar el Adalogger en el banco
+
+El Adalogger no tiene un entorno aparte: el firmware de vuelo ya escribe
+todo por USB.
+
+```sh
+pio run -e adalogger -t upload && pio device monitor -e adalogger
+```
+
+Al arrancar salen el periodo real del watchdog, la causa del reinicio,
+el archivo de la SD (`SD: escribiendo en L2_nnn.CSV`) y el resultado del
+modo Airborne. Después, una línea `L2: ...` por segundo (la misma fila
+que va a la SD) y una `RADIO: ...` cada 5 s (la trama que sale por el
+E220). Sin PC: cada segundo destella el LED verde si la SD graba, el
+rojo si no (`REQUISITOS.md` §2.3). Para ver las tramas por radio, un
+segundo E220 con la misma configuración en un adaptador USB-serie, a
+9600 baudios, en cualquier terminal serie.
 
 ## Probar los sensores desde el computador
 

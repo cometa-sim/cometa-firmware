@@ -3,11 +3,16 @@
 // GPS SAM-M8Q por I²C -> fila L2 en la SD (L2_nnn.CSV) cada 1 s ->
 // trama de radio por el E220 cada COMETA_RADIO_PERIODO_MS
 // (REQUISITOS.md §2, §2.2, §4.5). Mensajes de diagnóstico por Serial:
-// esta placa no tiene META.
+// esta placa no tiene META. La fila L2 sale también por Serial, con el
+// prefijo "L2: ", para probar la placa en el banco con el monitor serie.
 //
 // Esta placa es independiente de la del Teensy (REQUISITOS.md §2): no
 // asume nada de la otra cadena. La única relación entre los dos logs es
 // el UTC del GPS.
+//
+// Ninguna falla detiene a las demás: sin SD sigue la radio, sin GPS
+// siguen la SD (t_ms y v_batt) y la radio (la trama dice que la sonda
+// está viva), y la SD y el GPS se reintentan solos.
 
 #include <Arduino.h>
 #include <SD.h>
@@ -24,7 +29,10 @@
 // Archivo de log (REQUISITOS.md §4.1)
 // -----------------------------------------------------------------------
 File archivoL2;
-char nombreL2[16] = "";  // "L2_nnn.CSV"; vacío si la SD no montó
+char nombreL2[16] = "";  // "L2_nnn.CSV" del archivo abierto, o el último
+// Próximo intento de montar la SD si no está grabando (al arrancar sin
+// tarjeta, o después de un error de escritura en vuelo).
+uint32_t proximoReintentoSDMs = 0;
 
 // Fila L2 en construcción durante el tic de 1000 ms (REQUISITOS.md
 // §4.5). limpiarFilaL2() la vacía al principio de cada tic.
@@ -56,44 +64,147 @@ void configurarWatchdog() {
   }
 }
 
-// -----------------------------------------------------------------------
-// Arranque
-// -----------------------------------------------------------------------
-
-// Monta la SD (chip select COMETA_SD_CS_PIN) y busca el primer número
-// nnn libre para el archivo de esta corrida (REQUISITOS.md §2, §4.1).
-void inicializarSD() {
-  if (!SD.begin(COMETA_SD_CS_PIN)) {
-    Serial.println("SD: no monta (chip select pin 4); se sigue sin log");
-    return;
+// Causa del último reinicio (REQUISITOS.md §3.11): el registro RCAUSE del
+// SAMD21, que expone resetCause(). Un reinicio en vuelo se ve en la SD
+// como un L2_nnn.CSV nuevo y en tierra como n que vuelve a 0; esto dice
+// por qué. Va por Serial: esta placa no tiene META.
+void reportarCausaReinicio() {
+  const uint8_t causa = Watchdog.resetCause();
+  const char *nombre = "desconocida";
+  if (causa & PM_RCAUSE_WDT) {
+    nombre = "watchdog";
+  } else if (causa & PM_RCAUSE_SYST) {
+    nombre = "reinicio por software";
+  } else if (causa & PM_RCAUSE_EXT) {
+    nombre = "botón de reset";
+  } else if (causa & (PM_RCAUSE_BOD12 | PM_RCAUSE_BOD33)) {
+    nombre = "caída de tensión (brown-out)";
+  } else if (causa & PM_RCAUSE_POR) {
+    nombre = "encendido";
   }
-  for (int n = 0; n < COMETA_L2_MAX_ARCHIVOS; n++) {
-    snprintf(nombreL2, sizeof(nombreL2), COMETA_L2_PREFIJO "%03d" COMETA_L2_EXT, n);
-    if (!SD.exists(nombreL2)) {
-      return;
-    }
-  }
-  Serial.println("SD: no queda ningún nnn libre (000-999)");
-  nombreL2[0] = '\0';
+  Serial.print("ARRANQUE: causa del reinicio = ");
+  Serial.print(nombre);
+  Serial.print(" (RCAUSE 0x");
+  Serial.print(causa, HEX);
+  Serial.println(")");
 }
 
-// Crea L2_nnn.CSV y escribe su encabezado (REQUISITOS.md §4.1, §4.5). Un
-// archivo nuevo en cada arranque: si la alimentación se corta, el
-// anterior queda cerrado e intacto.
-void abrirArchivoL2() {
-  if (nombreL2[0] == '\0') {
-    return;
+// -----------------------------------------------------------------------
+// SD (REQUISITOS.md §2, §4.1)
+// -----------------------------------------------------------------------
+
+// Monta la SD (chip select COMETA_SD_CS_PIN), busca el primer nnn libre
+// y crea L2_nnn.CSV con su encabezado (REQUISITOS.md §4.1, §4.5). Un
+// archivo nuevo en cada arranque y en cada vuelta de la SD después de un
+// error: el anterior queda como estaba. true si el archivo quedó abierto
+// y el encabezado escrito.
+bool abrirArchivoL2() {
+  if (!SD.begin(COMETA_SD_CS_PIN)) {
+    Serial.println("SD: no monta (chip select pin 4); se sigue sin log");
+    return false;
+  }
+  int n = 0;
+  for (; n < COMETA_L2_MAX_ARCHIVOS; n++) {
+    snprintf(nombreL2, sizeof(nombreL2), COMETA_L2_PREFIJO "%03d" COMETA_L2_EXT, n);
+    if (!SD.exists(nombreL2)) {
+      break;
+    }
+  }
+  if (n == COMETA_L2_MAX_ARCHIVOS) {
+    Serial.println("SD: no queda ningún nnn libre (000-999)");
+    return false;
   }
   archivoL2 = SD.open(nombreL2, FILE_WRITE);
   if (!archivoL2) {
     Serial.print("SD: no se pudo crear ");
     Serial.println(nombreL2);
-    return;
+    return false;
   }
   escribirEncabezadoL2(archivoL2);
   archivoL2.flush();
+  if (archivoL2.getWriteError()) {
+    Serial.print("SD: no se pudo escribir el encabezado de ");
+    Serial.println(nombreL2);
+    archivoL2.close();
+    return false;
+  }
   Serial.print("SD: escribiendo en ");
   Serial.println(nombreL2);
+  return true;
+}
+
+// Si la SD no está grabando, la vuelve a montar cada
+// COMETA_SD_REINTENTO_MS. Se llama al final del tic, después de la radio:
+// un SD.begin() sin tarjeta tarda hasta ~2 s y no tiene que atrasar la
+// trama de este tic.
+void reintentarSDSiCorresponde(uint32_t ahora) {
+  if (archivoL2 || (int32_t)(ahora - proximoReintentoSDMs) < 0) {
+    return;
+  }
+  if (!abrirArchivoL2()) {
+    proximoReintentoSDMs = ahora + COMETA_SD_REINTENTO_MS;
+  }
+}
+
+// Escribe la fila en L2_nnn.CSV, con flush() cada
+// COMETA_FLUSH_CADA_N_MUESTRAS filas (REQUISITOS.md §3.2). true si la
+// fila quedó escrita. Si la escritura falla (tarjeta que se movió, un
+// corte breve de alimentación de la SD), cierra el archivo y programa el
+// reintento: la SD no vuelve sola, y seguir escribiendo en un archivo
+// roto perdería todo el resto del vuelo sin que nadie se entere.
+bool escribirFilaSD(const FilaL2 &f, uint32_t ahora) {
+  static uint32_t filasSinFlush = 0;
+  if (!archivoL2) {
+    return false;
+  }
+  escribirFilaL2(archivoL2, f);
+  if (++filasSinFlush >= COMETA_FLUSH_CADA_N_MUESTRAS) {
+    archivoL2.flush();
+    filasSinFlush = 0;
+  }
+  // getWriteError() queda en true desde la primera write() que falló.
+  // La librería guarda las filas en un bloque de 512 bytes y lo escribe
+  // en la tarjeta cuando se llena: una SD muerta se nota a las pocas
+  // filas, no necesariamente en la misma.
+  if (archivoL2.getWriteError()) {
+    Serial.print("SD: error de escritura en ");
+    Serial.print(nombreL2);
+    Serial.println("; se cierra y se reintenta en 30 s con un archivo nuevo");
+    archivoL2.close();
+    filasSinFlush = 0;
+    proximoReintentoSDMs = ahora + COMETA_SD_REINTENTO_MS;
+    return false;
+  }
+  return true;
+}
+
+// -----------------------------------------------------------------------
+// LEDs de estado (config_adalogger.h): un destello por tic, verde si la
+// fila se escribió en la SD, rojo si no. Sin delay(): se encienden en el
+// tic y loop() los apaga pasado COMETA_LED_DESTELLO_MS.
+// -----------------------------------------------------------------------
+uint32_t ledEncendidoMs = 0;
+bool ledEncendido = false;
+
+void iniciarLeds() {
+  pinMode(COMETA_LED_SD_OK_PIN, OUTPUT);
+  pinMode(COMETA_LED_SD_ERROR_PIN, OUTPUT);
+  digitalWrite(COMETA_LED_SD_OK_PIN, LOW);
+  digitalWrite(COMETA_LED_SD_ERROR_PIN, LOW);
+}
+
+void destellarLed(bool sdOk, uint32_t ahora) {
+  digitalWrite(sdOk ? COMETA_LED_SD_OK_PIN : COMETA_LED_SD_ERROR_PIN, HIGH);
+  ledEncendidoMs = ahora;
+  ledEncendido = true;
+}
+
+void apagarLedsSiCorresponde(uint32_t ahora) {
+  if (ledEncendido && ahora - ledEncendidoMs >= COMETA_LED_DESTELLO_MS) {
+    digitalWrite(COMETA_LED_SD_OK_PIN, LOW);
+    digitalWrite(COMETA_LED_SD_ERROR_PIN, LOW);
+    ledEncendido = false;
+  }
 }
 
 // -----------------------------------------------------------------------
@@ -120,46 +231,121 @@ void verificarConfiguracion() {
 }
 
 // -----------------------------------------------------------------------
-// GPS — SAM-M8Q propio (REQUISITOS.md §3.1, §3.9, §4.5, §5)
+// Recuperación del bus I²C (REQUISITOS.md §3.3)
 // -----------------------------------------------------------------------
 
-// Envía DYN_MODEL_AIRBORNE1g (CFG-NAV5 legacy), relee con
-// getDynamicModel() y registra el resultado (REQUISITOS.md §3.1).
+// Si SDA quedó baja: 9 pulsos en SCL y reinicializar Wire (REQUISITOS.md
+// §3.3). Se llama antes de cada intento de inicializarGPS(), al arrancar
+// incluido: un GPS que quedó a mitad de un byte cuando se reinició el
+// Feather (el watchdog, el botón de reset) sostiene SDA baja y begin()
+// fallaría siempre, en cada reintento, sin que nada liberara el bus.
+uint32_t recuperacionesI2C = 0;
+
+void recuperarBusI2C() {
+  Wire.end();
+  pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
+  if (digitalRead(PIN_WIRE_SDA) == LOW) {
+    // Algún dispositivo quedó a mitad de un byte sosteniendo SDA: con
+    // pulsos de reloj termina de sacarlo y suelta la línea.
+    pinMode(PIN_WIRE_SCL, OUTPUT);
+    for (int i = 0; i < COMETA_I2C_RECOVERY_PULSOS_SCL; i++) {
+      digitalWrite(PIN_WIRE_SCL, LOW);
+      delayMicroseconds(5);
+      digitalWrite(PIN_WIRE_SCL, HIGH);
+      delayMicroseconds(5);
+    }
+    recuperacionesI2C++;
+    Serial.print("I2C: SDA baja, recuperación #");
+    Serial.println(recuperacionesI2C);
+  }
+  Wire.begin();
+}
+
+// -----------------------------------------------------------------------
+// GPS — SAM-M8Q propio (REQUISITOS.md §3.1, §3.9, §4.5, §5)
+//
+// Igual que en el Teensy (src/teensy/sensores/gps.cpp, probado en el
+// banco):
+//   - setI2COutput(COM_TYPE_UBX): por I²C solo UBX, sin NMEA que leer y
+//     descartar en cada tic.
+//   - setAutoPVT(true): el receptor manda NAV-PVT solo, una vez por
+//     solución, y getPVT() lee lo que haya llegado sin esperar. Pedirlo
+//     con un poll obligaba a esperar la respuesta en cada tic.
+//   - Configuración en cada arranque, sin saveConfiguration(): no hace
+//     falta guardarla, se vuelve a mandar cada vez.
+// Propio de esta placa: si pasa COMETA_GPS_SIN_PVT_MAX_MS sin NAV-PVT,
+// se recupera el bus y se reinicializa enseguida. Un SAM-M8Q que se
+// reinició (una caída de tensión del pin 3V) vuelve con la configuración
+// de fábrica: modo Portable, que deja de dar fix por encima de 12 km, y
+// sin NAV-PVT automático. Es el único sensor de esta placa: no se espera
+// al reintento de 30 s para devolverle el modo Airborne. Solo si ya
+// había llegado algún NAV-PVT desde la última inicialización: si no,
+// reinicializarlo de nuevo no cambia nada y se espera el reintento.
+// -----------------------------------------------------------------------
 SFE_UBLOX_GNSS gps;
 bool gpsPresente = false;
 uint32_t proximoReintentoGPSMs = 0;
+uint32_t ultimoPVTMs = 0;
+bool huboPVTDesdeInicio = false;
 
-void recuperarBusI2C();
-
+// begin() en 0x42, solo UBX por I²C, DYN_MODEL_AIRBORNE1g (CFG-NAV5
+// legacy) releído con getDynamicModel() (REQUISITOS.md §3.1) y NAV-PVT
+// automático. Si algo falla, se reintenta en COMETA_GPS_REINTENTO_MS.
 void inicializarGPS() {
-  gpsPresente = gps.begin(Wire, COMETA_GPS_I2C_ADDR);
-  if (!gpsPresente) {
+  const uint32_t ahora = millis();
+  recuperarBusI2C();
+  gpsPresente = false;
+
+  if (!gps.begin(Wire, COMETA_GPS_I2C_ADDR)) {
     Serial.println("GPS: no responde en 0x42; se reintenta cada 30 s");
-    proximoReintentoGPSMs = millis() + COMETA_GPS_REINTENTO_MS;
+    proximoReintentoGPSMs = ahora + COMETA_GPS_REINTENTO_MS;
     return;
   }
+  gps.setI2COutput(COM_TYPE_UBX);
   gps.setDynamicModel(DYN_MODEL_AIRBORNE1g);
   const bool airborne = (gps.getDynamicModel() == DYN_MODEL_AIRBORNE1g);
   Serial.println(airborne ? "GPS: modo Airborne <1g confirmado"
                           : "GPS: el modo Airborne <1g NO quedó (REQUISITOS.md §3.1)");
+  if (!gps.setAutoPVT(true)) {
+    // Sin NAV-PVT automático getPVT() no traería nada.
+    Serial.println("GPS: no aceptó NAV-PVT automático; se reintenta en 30 s");
+    proximoReintentoGPSMs = ahora + COMETA_GPS_REINTENTO_MS;
+    return;
+  }
+  gpsPresente = true;
+  huboPVTDesdeInicio = false;
+  ultimoPVTMs = millis();
 }
 
 // Lee posición, altitud, vz_ms, sats, fix y UTC del GPS
-// (REQUISITOS.md §3.9, §4.5). Vuelca en f, solo si hay un fix nuevo.
-// utc se escribe SOLO con copiarUTC(f.utc, cadena) de log_format.h,
-// nunca con strcpy() directo: es un char[21] justo y un desborde pisaría
-// lat y lon (REQUISITOS.md §4.2).
-void leerGPS(FilaL2 &f) {
+// (REQUISITOS.md §3.9, §4.5). Vuelca en f, solo si llegó un NAV-PVT
+// nuevo. utc se escribe SOLO con copiarUTC(f.utc, cadena) de
+// log_format.h, nunca con strcpy() directo: es un char[21] justo y un
+// desborde pisaría lat y lon (REQUISITOS.md §4.2).
+void leerGPS(FilaL2 &f, uint32_t ahora) {
   if (!gpsPresente) {
-    if ((int32_t)(millis() - proximoReintentoGPSMs) >= 0) {
+    if ((int32_t)(ahora - proximoReintentoGPSMs) >= 0) {
       inicializarGPS();
     }
     return;
   }
-  if (!gps.getPVT(COMETA_GPS_ESPERA_PVT_MS)) {
-    recuperarBusI2C();
-    return;  // sin respuesta en este tic: celdas vacías
+  if (!gps.getPVT()) {
+    // Todavía no llegó un NAV-PVT nuevo: celdas vacías en esta fila.
+    if (ahora - ultimoPVTMs < COMETA_GPS_SIN_PVT_MAX_MS) {
+      return;
+    }
+    if (huboPVTDesdeInicio) {
+      Serial.println("GPS: sin NAV-PVT; se recupera el bus y se reinicializa");
+      inicializarGPS();
+    } else {
+      Serial.println("GPS: ningún NAV-PVT desde que se inicializó; se reintenta en 30 s");
+      gpsPresente = false;
+      proximoReintentoGPSMs = ahora + COMETA_GPS_REINTENTO_MS;
+    }
+    return;
   }
+  ultimoPVTMs = ahora;
+  huboPVTDesdeInicio = true;
 
   // El receptor contestó: fix y sats van siempre, dicen por qué no hay
   // posición. utc, posición, altitud y velocidad solo con fix 3D válido.
@@ -184,64 +370,19 @@ void leerGPS(FilaL2 &f) {
 }
 
 // -----------------------------------------------------------------------
-// Recuperación del bus I²C (REQUISITOS.md §3.3)
-// -----------------------------------------------------------------------
-
-// Si SDA queda baja: 9 pulsos en SCL y reinicializar (REQUISITOS.md
-// §3.3). Se llama desde leerGPS() cuando detecta un error o timeout, no
-// en cada vuelta de loop().
-uint32_t recuperacionesI2C = 0;
-
-void recuperarBusI2C() {
-  Wire.end();
-  pinMode(PIN_WIRE_SDA, INPUT_PULLUP);
-  if (digitalRead(PIN_WIRE_SDA) == LOW) {
-    // Algún dispositivo quedó a mitad de un byte sosteniendo SDA: con
-    // pulsos de reloj termina de sacarlo y suelta la línea.
-    pinMode(PIN_WIRE_SCL, OUTPUT);
-    for (int i = 0; i < COMETA_I2C_RECOVERY_PULSOS_SCL; i++) {
-      digitalWrite(PIN_WIRE_SCL, LOW);
-      delayMicroseconds(5);
-      digitalWrite(PIN_WIRE_SCL, HIGH);
-      delayMicroseconds(5);
-    }
-    recuperacionesI2C++;
-    Serial.print("I2C: SDA baja, recuperación #");
-    Serial.println(recuperacionesI2C);
-  }
-  Wire.begin();
-}
-
-// -----------------------------------------------------------------------
 // Batería (REQUISITOS.md §3.10, §4.5)
 // -----------------------------------------------------------------------
 
-// Lee v_batt por ADC (REQUISITOS.md §3.10). Vuelca en f, solo si hay un
-// dato nuevo.
+// Lee v_batt por ADC (REQUISITOS.md §3.10): promedio de
+// COMETA_VBATT_MUESTRAS lecturas, unos 4 ms en total.
 void leerBateria(FilaL2 &f) {
-  const int lectura = analogRead(COMETA_VBATT_ADC_PIN);
+  uint32_t suma = 0;
+  for (int i = 0; i < COMETA_VBATT_MUESTRAS; i++) {
+    suma += analogRead(COMETA_VBATT_ADC_PIN);
+  }
+  const float lectura = (float)suma / COMETA_VBATT_MUESTRAS;
   f.v_batt = lectura * (COMETA_ADC_VREF / ((1 << COMETA_ADC_BITS) - 1)) *
              COMETA_VBATT_DIVISOR_FACTOR;
-}
-
-// -----------------------------------------------------------------------
-// Log L2 (REQUISITOS.md §2, §4.2, §4.5)
-// -----------------------------------------------------------------------
-//
-// El encabezado (escribirEncabezadoL2), la struct FilaL2, limpiarFilaL2()
-// y escribirFilaL2() están en include/log_format.h, compartido con
-// src/teensy (REQUISITOS.md §1).
-
-// flush() cada COMETA_FLUSH_CADA_N_MUESTRAS muestras (REQUISITOS.md §3.2).
-void flushLogSiCorresponde() {
-  static uint32_t filasSinFlush = 0;
-  if (!archivoL2) {
-    return;
-  }
-  if (++filasSinFlush >= COMETA_FLUSH_CADA_N_MUESTRAS) {
-    archivoL2.flush();
-    filasSinFlush = 0;
-  }
 }
 
 // -----------------------------------------------------------------------
@@ -273,11 +414,11 @@ class BufferTrama : public Print {
 
 // Cada COMETA_RADIO_PERIODO_MS, también sin fix: arma la trama
 // "id,n,hhmmss,lat,lon,alt_m,vz_ms,sats,fix,v_batt" en un buffer de
-// COMETA_RADIO_LARGO_MAX con snprintf() (mismos decimales que L2, celda
-// vacía si el campo es NAN o utc está vacío) y la manda con UNA sola
-// println(), sin esperar respuesta y sin reintentar. n cuenta las tramas
-// enviadas desde el arranque. Se llama DESPUÉS de escribir la fila en la
-// SD: la radio nunca frena el log.
+// COMETA_RADIO_LARGO_MAX (mismos decimales que L2, celda vacía si el
+// campo es NAN o utc está vacío) y la manda con UNA sola write(), sin
+// esperar respuesta y sin reintentar. n cuenta las tramas enviadas desde
+// el arranque. Se llama DESPUÉS de escribir la fila en la SD: la radio
+// nunca frena el log.
 void enviarTramaRadio(const FilaL2 &f, uint32_t ahora) {
   static bool primera = true;
   static uint32_t ultimaTramaMs = 0;
@@ -331,7 +472,7 @@ void enviarTramaRadio(const FilaL2 &f, uint32_t ahora) {
 void setup() {
   // Serial primero, para que configurarWatchdog() pueda informar el
   // periodo real. Sin `while (!Serial)`: esperando al host USB la placa
-  // no arrancaría nunca en vuelo.
+  // no arrancaría nunca en vuelo. Sin host, print() no hace nada.
   Serial.begin(115200);
 
   // El watchdog se arma lo primero de todo, antes de tocar nada: así
@@ -341,15 +482,17 @@ void setup() {
   // libre y configurar el GPS sí suman más sin que nada esté colgado, y
   // la placa se reiniciaría antes de llegar a loop(), una y otra vez.
   configurarWatchdog();
+  reportarCausaReinicio();
 
+  iniciarLeds();
   analogReadResolution(COMETA_ADC_BITS);
   Wire.begin();
 
   verificarConfiguracion();
   Watchdog.reset();
-  inicializarSD();
-  Watchdog.reset();
-  abrirArchivoL2();
+  if (!abrirArchivoL2()) {
+    proximoReintentoSDMs = millis() + COMETA_SD_REINTENTO_MS;
+  }
   Watchdog.reset();
   inicializarGPS();
   Watchdog.reset();
@@ -360,12 +503,14 @@ void setup() {
 void loop() {
   Watchdog.reset();  // una sola vez por pasada de loop() (REQUISITOS.md §3.11)
 
-  // Tick a 1 Hz (COMETA_TICK_L2_MS), sin delay() (REQUISITOS.md §4.1). Se
+  const uint32_t ahora = millis();
+  apagarLedsSiCorresponde(ahora);
+
+  // Tick a 1 Hz (COMETA_TICK_L2_MS), sin delay() (REQUISITOS.md §1.1). Se
   // reprograma sumando el período, no fijándolo a "ahora", para no
   // acumular atraso; si se atrasó más de un período completo, se
   // realinea a "ahora" en vez de intentar recuperarlo.
-  const unsigned long ahora = millis();
-  static unsigned long ultimoTickL2 = 0;
+  static uint32_t ultimoTickL2 = 0;
 
   if (ahora - ultimoTickL2 >= COMETA_TICK_L2_MS) {
     ultimoTickL2 += COMETA_TICK_L2_MS;
@@ -376,13 +521,18 @@ void loop() {
     limpiarFilaL2(filaL2);
     filaL2.t_ms = ahora;
 
-    leerGPS(filaL2);
+    leerGPS(filaL2, ahora);
     leerBateria(filaL2);
 
-    escribirFilaL2(archivoL2, filaL2);
-    flushLogSiCorresponde();
+    const bool sdOk = escribirFilaSD(filaL2, ahora);
+    destellarLed(sdOk, ahora);
+    Serial.print("L2: ");
+    escribirFilaL2(Serial, filaL2);
 
     // Después de la SD, nunca antes (REQUISITOS.md §2.2).
     enviarTramaRadio(filaL2, ahora);
+
+    // Al final: un SD.begin() sin tarjeta tarda y no atrasa la trama.
+    reintentarSDSiCorresponde(ahora);
   }
 }

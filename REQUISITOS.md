@@ -123,7 +123,7 @@ Los datos científicos se quedan en el Teensy: mandarlos por radio alargaría la
 C2,412,143210,-33.245678,-58.031234,18240.0,5.20,9,3,4.98
 ```
 
-Sin fix: `C2,413,,,,,,4,0,4.98` (la trama sale igual: dice que la sonda está viva).
+Sin fix: `C2,413,,,,,,4,0,4.98` (la trama sale igual: dice que la sonda está viva). Si el GPS no contestó en ese segundo, también `sats` y `fix` van vacíos: `C2,414,,,,,,,,4.98`.
 
 Para qué sirve cada campo durante el seguimiento: `lat`, `lon` y `alt_m` dicen adónde ir; `vz_ms` dice en qué fase está el vuelo (positiva en subida, muy negativa justo después del estallido, unos pocos m/s en el descenso con paracaídas, cero en tierra); `sats` y `fix` dicen cuánto confiar en la posición; `v_batt` dice cuánto va a durar la transmisión.
 
@@ -137,6 +137,26 @@ Para qué sirve cada campo durante el seguimiento: `lat`, `lon` y `alt_m` dicen 
 - **La radio nunca frena la SD.** En cada tic se escribe primero la fila en `L2_nnn.CSV` y después, si toca, la trama. La trama se manda sin esperar respuesta del módulo y no se reintenta. A 9600 baudios, 60 bytes tardan unos 60 ms en salir por la UART; si el buffer de salida de `Serial1` se llena, `write()` espera, por eso la trama tiene que ser corta.
 - **Largo**: unos 60 bytes con CR LF; en el peor caso (contador de 5 cifras, `alt_m` > 10 km, `vz_ms` negativa de dos cifras), unos 64. A 2,4 kbps de aire eso ocupa el canal unos 0,3 s: entra con margen en 5 s.
 - **Consumo**: depende de la potencia configurada en el módulo (**[VERIFICAR]**); el balance está en el manual.
+
+**En tierra: cómo se lee la trama**
+
+Lo que el receptor de tierra tiene que respetar para pasar las tramas a la página de la diretta junto con los puntos del SPOT Trace:
+
+- **Una trama = una línea** terminada en CR LF. Se acepta solo si contiene `C2,` y tiene **10 campos** (9 comas); lo demás se descarta: en 920 MHz puede haber otros transmisores en el mismo canal. `C2,` se busca dentro de la línea, no solo en la posición 0: si el E220 de tierra tiene activado el byte de RSSI, ese byte binario llega después del CR LF y queda al principio de la línea siguiente.
+- **Fecha.** La trama trae solo `hhmmss`; la fecha la pone el receptor con su reloj UTC. Si `hhmmss` queda más de 12 h por delante de la hora de recepción, la trama es del día anterior (recibida a las 00:00:02 con `235958`).
+- **Celda vacía no es cero**: un punto va al mapa solo si `lat` y `lon` tienen valor. Una trama sin posición dice igual que la sonda está viva y cuánta batería le queda.
+- **Varios receptores** reciben la misma trama: la clave para no duplicarla es `id` + fecha + `hhmmss`, el instante de la solución GPS, distinto en cada punto. `n` **no** sirve de clave: vuelve a 0 si la placa se reinicia y pisaría puntos anteriores del mismo vuelo.
+- `n` sirve para medir el enlace: los huecos son tramas perdidas por ese receptor; una vuelta a 0 es un reinicio del Adalogger.
+- La trama tiene los mismos números que la fila de `L2_nnn.CSV` del mismo segundo: después del vuelo, la telemetría recibida se compara con la SD uniendo por `utc`.
+
+### 2.3 Fallas en el Adalogger
+
+Ninguna falla detiene a las demás: sin SD sigue la radio; sin GPS siguen la SD y la radio (`t_ms`, `v_batt` y la trama sin posición).
+
+- **GPS.** Como en el Teensy: solo UBX por I²C (`setI2COutput`) y NAV-PVT automático (`setAutoPVT`), así `getPVT()` no espera. Un tic sin NAV-PVT nuevo es normal; **3 s sin ninguno** (`COMETA_GPS_SIN_PVT_MAX_MS`) no: se recupera el bus (§3.3) y se reinicializa **enseguida**, reenviando el modo Airborne. Un SAM-M8Q que se reinició (una caída de tensión del pin 3V) vuelve con la configuración de fábrica, modo Portable, sin fix por encima de 12 km: es el único sensor de esta placa y no se espera al reintento. Si no contesta, o no manda ningún NAV-PVT después de reinicializado, se reintenta cada 30 s (`COMETA_GPS_REINTENTO_MS`). La recuperación del bus se hace antes de **cada** `begin()`, el del arranque incluido: un GPS que quedó a mitad de un byte cuando se reinició el Feather sostiene SDA baja, y sin eso no volvería nunca.
+- **SD.** Si no monta al arrancar, o si una escritura falla en vuelo (`getWriteError()`), se cierra el archivo y se vuelve a montar cada 30 s (`COMETA_SD_REINTENTO_MS`), siguiendo en un `L2_nnn.CSV` nuevo (§4.1). El intento va al final del tic, después de la trama: `SD.begin()` sin tarjeta tarda hasta ~2 s.
+- **LEDs**, para revisar la sonda antes de cerrarla sin conectar la PC: en cada tic destella uno, **verde** (pin 8, junto a la ranura de la SD) si la fila se escribió en la SD, **rojo** (pin 13) si la SD no está grabando.
+- **Por Serial**, para el banco: el periodo real del watchdog y la causa del último reinicio (§3.11), y después la fila L2 de cada segundo (`L2: `) y cada trama enviada (`RADIO: `).
 
 ## 3. Requisitos del firmware (manual, cap. 7)
 
@@ -175,7 +195,7 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 | Teensy | `META_nnn.TXT` | datos que no cambian durante el vuelo |
 | Adalogger | `L2_nnn.CSV` | posición a 1 Hz |
 
-- **Un archivo nuevo en cada arranque**, `nnn` progresivo (el primer número libre en la SD). Si la alimentación se corta, el archivo anterior queda cerrado e intacto.
+- **Un archivo nuevo en cada arranque**, `nnn` progresivo (el primer número libre en la SD). Si la alimentación se corta, el archivo anterior queda cerrado e intacto. En el Adalogger, también cada vez que la SD vuelve después de un error (§2.3).
 - Nombres 8.3 en mayúsculas: la microSD de 64 MB es **FAT16**.
 
 ### 4.2 Convenciones
