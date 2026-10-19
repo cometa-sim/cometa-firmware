@@ -427,15 +427,23 @@ class BufferTrama : public Print {
 // esperar respuesta y sin reintentar. n cuenta las tramas enviadas desde
 // el arranque. Se llama DESPUÉS de escribir la fila en la SD: la radio
 // nunca frena el log.
-void enviarTramaRadio(const FilaL2 &f, uint32_t ahora) {
-  static bool primera = true;
-  static uint32_t ultimaTramaMs = 0;
+//
+// El periodo se cuenta en tics (una trama cada 5), no comparando millis()
+// con el instante de la trama anterior: los tics llegan con unos ms de
+// variación, y a 4999 ms la trama se pasaba al tic siguiente. En el banco
+// salían cada 5 o 6 s, alternando.
+static_assert(COMETA_RADIO_PERIODO_MS % COMETA_TICK_L2_MS == 0,
+              "COMETA_RADIO_PERIODO_MS tiene que ser un múltiplo del tic");
+const uint32_t TICS_POR_TRAMA = COMETA_RADIO_PERIODO_MS / COMETA_TICK_L2_MS;
+
+void enviarTramaRadio(const FilaL2 &f) {
+  // La primera trama sale en el primer tic: n = 0 avisa del arranque.
+  static uint32_t ticsDesdeTrama = TICS_POR_TRAMA - 1;
   static uint32_t contador = 0;
-  if (!primera && ahora - ultimaTramaMs < COMETA_RADIO_PERIODO_MS) {
+  if (++ticsDesdeTrama < TICS_POR_TRAMA) {
     return;
   }
-  primera = false;
-  ultimaTramaMs = ahora;
+  ticsDesdeTrama = 0;
 
   BufferTrama trama;
   trama.print(COMETA_RADIO_ID);
@@ -567,7 +575,7 @@ void loop() {
     escribirFilaL2(Serial, filaL2);
 
     // Después de la SD, nunca antes (REQUISITOS.md §2.2).
-    enviarTramaRadio(filaL2, ahora);
+    enviarTramaRadio(filaL2);
 
     // Al final: un SD.begin() sin tarjeta tarda y no atrasa la trama.
     reintentarSDSiCorresponde(ahora);
