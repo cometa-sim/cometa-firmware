@@ -87,11 +87,14 @@
 // §2.1, §3.10 — Tensión de batería por ADC. El pack se conecta por el pin
 // USB a través de un diodo (1N5819/1N5817), nunca por el JST BAT: el pin
 // A7 de fábrica del Feather M0 (que mide la batería del JST) NO sirve acá.
-// Divisor propio 100 kΩ / 100 kΩ en A1, colocado sobre el positivo del
+// Divisor propio 100 kΩ / 100 kΩ en A2, colocado sobre el positivo del
 // pack ANTES del diodo, con un cerámico de 100 nF entre el punto medio
 // del divisor y GND (REQUISITOS.md §2.1).
+// A2 y no A1: en el banco, con adalogger_pines, el mismo cable del
+// divisor no daba nada en A1 (valores al azar, como un pin libre) y sí
+// en A2. El pin A1 de este Feather no hace contacto.
 // -----------------------------------------------------------------------
-#define COMETA_VBATT_ADC_PIN        A1
+#define COMETA_VBATT_ADC_PIN        A2
 #define COMETA_VBATT_DIVISOR_FACTOR 2.0
 // ADC del SAMD21: referencia 3,3 V, lectura a 12 bits.
 #define COMETA_ADC_VREF 3.3

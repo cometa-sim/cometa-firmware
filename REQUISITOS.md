@@ -88,7 +88,7 @@ No comparten bus, alimentación ni masa. El código de una placa no debe asumir 
 ### 2.1 Alimentación
 
 - El pack de baterías del Adalogger se conecta por el pin **USB** a través de un diodo (**1N5819** o **1N5817**), **nunca** por el conector **JST BAT**. Por eso el pin `A7` de fábrica del Feather M0 (pensado para medir la batería del JST) **no sirve** para medir este pack: hace falta un divisor propio en otro pin.
-- Divisores de tensión de batería: **100 kΩ / 100 kΩ** en `A1` (Adalogger), **100 kΩ / 33 kΩ** en `A0` (Teensy).
+- Divisores de tensión de batería: **100 kΩ / 100 kΩ** en `A2` (Adalogger; no `A1`: en el Feather del banco el pin `A1` no hace contacto), **100 kΩ / 33 kΩ** en `A0` (Teensy).
   - Adalogger: el divisor va sobre el positivo del pack, **después** del interruptor y **antes** del diodo.
   - Teensy: el divisor va **después** del interruptor del nivel 3 (mide la tensión que realmente llega a la placa, no la del pack).
   - En los dos: un cerámico de **100 nF** entre el punto medio del divisor y GND.
@@ -169,7 +169,7 @@ Ninguna falla detiene a las demás: sin SD sigue la radio; sin GPS siguen la SD 
 7. **Datos fuera de especificación se marcan, no se descartan** (ver §4.4).
 8. **Reloj del Teensy a 150 MHz** (rango aceptable 150–300). Frecuencias disponibles en el core instalado o `set_arm_clock()`: **[VERIFICAR]**.
 9. **UTC del GPS** en ambos logs. Verificación con prueba en auto (prueba 12).
-10. **Tensión de batería** por ADC en ambas placas: Teensy en `A0` (divisor 100 kΩ/33 kΩ), Adalogger en `A1` (divisor 100 kΩ/100 kΩ). Ver §2.1.
+10. **Tensión de batería** por ADC en ambas placas: Teensy en `A0` (divisor 100 kΩ/33 kΩ), Adalogger en `A2` (divisor 100 kΩ/100 kΩ). Ver §2.1.
 
 El termostato del pad calefactor **no** forma parte de la configuración de vuelo: no se implementa ahora.
 

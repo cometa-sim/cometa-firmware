@@ -29,7 +29,7 @@ prueba en tierra con el entorno `teensy41_prueba_imu`.
 
 El **Adalogger** (`src/adalogger/main.cpp`) está completo: GPS SAM-M8Q en
 modo Airborne con NAV-PVT automático (como el del Teensy), `L2_nnn.CSV`
-nuevo en cada arranque con `flush()` cada 10 filas, batería en A1 y
+nuevo en cada arranque con `flush()` cada 10 filas, batería en A2 y
 trama de radio por el E220 cada 5 s (§2.2). Cada parte sigue sola si
 otra falla: el GPS se reinicializa si deja de mandar datos, la SD se
 vuelve a montar si una escritura falla, y dos LEDs dicen si está
@@ -133,7 +133,7 @@ segundo E220 con la misma configuración en un adaptador USB-serie, a
 9600 baudios, en cualquier terminal serie.
 
 Si `v_batt` no da la tensión del pack (por ejemplo ~2,7 V que salta,
-igual con y sin pilas), el divisor no llega a `A1`. Sin multímetro, el
+igual con y sin pilas), el divisor no llega a `A2`. Sin multímetro, el
 entorno `adalogger_pines` escribe cada segundo la tensión de A0-A5 y A7:
 con el USB y el pack de 3 pilas conectados a la vez, al prender y apagar
 el interruptor del pack el pin del divisor pasa de la mitad del pack a
