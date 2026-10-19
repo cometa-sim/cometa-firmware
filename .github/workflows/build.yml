@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        environment: [teensy41, adalogger, banco, teensy41_prueba_imu]
+        environment: [teensy41, adalogger, banco, teensy41_prueba_imu, adalogger_pines]
     steps:
       - uses: actions/checkout@v7
 

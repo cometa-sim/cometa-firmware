@@ -76,6 +76,7 @@ platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 | `adalogger` | Feather M0 Adalogger | posición y altitud de respaldo, telemetría E220 | `L2_nnn.CSV` |
 | `banco` | Teensy 4.1 | prueba de sensores por USB, sin SD ni watchdog | ninguno: todo por Serial |
 | `teensy41_prueba_imu` | Teensy 4.1 | el de vuelo, con la ventana IMU armada y disparada en tierra (no vuela) | los de `teensy41` |
+| `adalogger_pines` | Feather M0 Adalogger | el Feather como voltímetro: tensión en A0-A5 y A7 por Serial, para revisar el divisor de batería sin multímetro (no vuela) | ninguno |
 
 ## Valores pendientes de verificar
 
@@ -130,6 +131,17 @@ y una `RADIO: ...` cada 5 s (la trama que sale por el E220). Sin PC: cada segund
 rojo si no (`REQUISITOS.md` §2.3). Para ver las tramas por radio, un
 segundo E220 con la misma configuración en un adaptador USB-serie, a
 9600 baudios, en cualquier terminal serie.
+
+Si `v_batt` no da la tensión del pack (por ejemplo ~2,7 V que salta,
+igual con y sin pilas), el divisor no llega a `A1`. Sin multímetro, el
+entorno `adalogger_pines` escribe cada segundo la tensión de A0-A5 y A7:
+con el USB y el pack de 3 pilas conectados a la vez, al prender y apagar
+el interruptor del pack el pin del divisor pasa de la mitad del pack a
+0 V. Después se vuelve a cargar `adalogger`.
+
+```sh
+pio run -e adalogger_pines -t upload && pio device monitor -e adalogger_pines
+```
 
 ## Probar los sensores desde el computador
 
