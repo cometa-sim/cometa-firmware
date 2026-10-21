@@ -264,7 +264,7 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 | SHT45 | I²C | 0x44 | en el brazo exterior |
 | ICM-20948 | I²C | **0x69** | breakout con AD0 alto, no 0x68. ±16 g, 100 Hz |
 | LTR390 | I²C | 0x53 | |
-| 2 × MAX31865 | SPI | CS: brazo exterior pin **10**, tubo pin **9** | 3 hilos |
+| 2 × MAX31865 | SPI (brazo) y SPI1 (tubo) | brazo: MOSI **11**, MISO **12**, SCK **13**, CS **10**. Tubo: MOSI1 **26**, MISO1 **39**, SCK1 **27**, CS **9** | 3 hilos. Un bus por placa: cada una cableada directo a sus pines. MISO1 en 39 porque el pin 1 es el TX1 del PMS5003 |
 | PMS5003 | UART | `Serial1`: RX pin **0**, TX pin **1** | MOSFET en pin **4** |
 | E220 (Adalogger) | UART | `Serial1`: TX (D1) → RXD, RX (D0) ← TXD | M0 = M1 = GND, ver §2.2 |
 | 4 × DS18B20 | 1-Wire | pin **2**, pull-up 4,7 kΩ | |
