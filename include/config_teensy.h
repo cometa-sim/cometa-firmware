@@ -14,8 +14,8 @@
 #include <Adafruit_MAX31865.h>
 
 // -----------------------------------------------------------------------
-// Centinela para el único valor [VERIFICAR] que queda fuera de las ROM
-// de los DS18B20: el timeout de recuperación I²C. Es un valor imposible
+// Centinela para el único valor [VERIFICAR] que queda: el timeout de
+// recuperación I²C. Es un valor imposible
 // en la práctica, para que el placeholder sea evidente en vez de un
 // número creíble.
 // -----------------------------------------------------------------------
@@ -142,35 +142,22 @@
 #define COMETA_LTR390_I2C_ADDR 0x53
 
 // -----------------------------------------------------------------------
-// §5 — 2x MAX31865 (SPI) para sondas PT1000 (brazo exterior y tubo)
+// §5 — 2x MAX31865 (SPI) para sondas PT1000, A y B. A es la que da la T
+// exterior: con ella se decide el encendido del PMS5003 (§6) y q_pms.
 // -----------------------------------------------------------------------
 #define COMETA_MAX31865_RREF        4300.0
 #define COMETA_MAX31865_RNOMINAL    1000.0
-#define COMETA_MAX31865_CS_ARM_PIN  10  // brazo exterior, en SPI (MOSI 11, MISO 12, SCK 13)
-#define COMETA_MAX31865_CS_TUBO_PIN 9   // tubo, en SPI1
-// El tubo va en su propio bus, SPI1: cada MAX31865 se cablea directo a
-// sus pines del Teensy, sin repartir MOSI/MISO/SCK entre las dos placas,
-// y si uno deja su bus mal el otro no se entera. MISO1 por defecto es el
+#define COMETA_MAX31865_CS_A_PIN 10  // A, en SPI (MOSI 11, MISO 12, SCK 13)
+#define COMETA_MAX31865_CS_B_PIN 9   // B, en SPI1
+// B va en su propio bus, SPI1: cada MAX31865 se cablea directo a sus
+// pines del Teensy, sin repartir MOSI/MISO/SCK entre las dos placas, y
+// si uno deja su bus mal el otro no se entera. MISO1 por defecto es el
 // pin 1, que es el TX1 del PMS5003: se usa la alternativa, el 39.
-#define COMETA_MAX31865_TUBO_SPI      SPI1
-#define COMETA_MAX31865_TUBO_MOSI_PIN 26
-#define COMETA_MAX31865_TUBO_MISO_PIN 39
-#define COMETA_MAX31865_TUBO_SCK_PIN  27
+#define COMETA_MAX31865_B_SPI      SPI1
+#define COMETA_MAX31865_B_MOSI_PIN 26
+#define COMETA_MAX31865_B_MISO_PIN 39
+#define COMETA_MAX31865_B_SCK_PIN  27
 #define COMETA_MAX31865_WIRING      MAX31865_3WIRE
-
-// -----------------------------------------------------------------------
-// §5 — 4x DS18B20 (1-Wire, pull-up 4.7 kΩ). Resolución 12 bits,
-// setWaitForConversion(false): nunca bloquear el loop 750 ms.
-// -----------------------------------------------------------------------
-#define COMETA_DS18B20_BUS_PIN 2  // bus 1-Wire compartido por las cuatro sondas
-#define COMETA_DS18B20_RESOLUCION_BITS 12
-
-// TODO VERIFICAR: identificar las cuatro ROM antes del montaje (caja,
-// pilas, centro del volumen, SCD30) y completar aquí (REQUISITOS.md §5).
-#define COMETA_DS18B20_ROM_CASSA   { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-#define COMETA_DS18B20_ROM_PILE    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-#define COMETA_DS18B20_ROM_CENTRO  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
-#define COMETA_DS18B20_ROM_SCD     { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
 
 // -----------------------------------------------------------------------
 // §5 — Geiger GGreg20 (interrupción vía optoacoplador)
@@ -216,10 +203,10 @@
 // -----------------------------------------------------------------------
 // §4.4 — Flags de calidad (0 = en especificación, 1 = fuera)
 // -----------------------------------------------------------------------
-#define COMETA_Q_PMS_TEMP_ARM_MIN_C   (-10.0)  // PT1000 brazo
+#define COMETA_Q_PMS_TEMP_PTA_MIN_C   (-10.0)  // PT1000 A (exterior)
 #define COMETA_Q_RH_TEMP_SHT_MIN_C    (-40.0)  // SHT45
-#define COMETA_Q_ARM_TEMP_MIN_C       (-50.0)  // PT1000 brazo
-#define COMETA_Q_TUBO_TEMP_MIN_C      (-50.0)  // PT1000 tubo
+#define COMETA_Q_PTA_TEMP_MIN_C       (-50.0)  // PT1000 A
+#define COMETA_Q_PTB_TEMP_MIN_C       (-50.0)  // PT1000 B
 #define COMETA_Q_P_MIN_HPA            (10.0)   // MS8607
 
 // -----------------------------------------------------------------------
@@ -281,8 +268,7 @@
 // -----------------------------------------------------------------------
 // §1.2 — Presupuesto de bloqueo de un módulo de sensor. Una llamada a
 // actualizar() en el tic de 1000 ms no puede bloquear más que esto; una
-// conversión más larga (DS18B20: 750 ms a 12 bits) se parte en dos
-// pasadas, arranque y recogida. En el tic de 10 ms no se bloquea nada.
+// conversión más larga se parte en dos pasadas, arranque y recogida. En el tic de 10 ms no se bloquea nada.
 // -----------------------------------------------------------------------
 #define COMETA_BLOQUEO_MAX_MS 20UL
 

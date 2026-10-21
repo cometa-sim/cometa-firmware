@@ -31,7 +31,6 @@
 #include "config_teensy.h"
 #include "log_format.h"
 
-#include "../teensy/sensores/ds18b20.h"
 #include "../teensy/sensores/geiger.h"
 #include "../teensy/sensores/gps.h"
 #include "../teensy/sensores/icm20948.h"
@@ -140,8 +139,8 @@ void imprimirBloqueos();
 void imprimirDiagnostico() {
   escanearI2C();
   Serial.println("SPI:");
-  diagnosticoMAX31865(SPI, COMETA_MAX31865_CS_ARM_PIN, "MAX31865 brazo");
-  diagnosticoMAX31865(COMETA_MAX31865_TUBO_SPI, COMETA_MAX31865_CS_TUBO_PIN, "MAX31865 tubo");
+  diagnosticoMAX31865(SPI, COMETA_MAX31865_CS_A_PIN, "MAX31865 A");
+  diagnosticoMAX31865(COMETA_MAX31865_B_SPI, COMETA_MAX31865_CS_B_PIN, "MAX31865 B");
   imprimirBloqueos();
   Serial.println();
 }
@@ -173,13 +172,11 @@ EstadoSensor sensores[] = {
      SensorSHT45::llenarFila, false, 0, 0, 0},
     {"LTR390", SensorLTR390::iniciar, SensorLTR390::actualizar,
      SensorLTR390::llenarFila, false, 0, 0, 0},
-    {"MAX31865_BRAZO", SensorPT1000Brazo::iniciar,
-     SensorPT1000Brazo::actualizar, SensorPT1000Brazo::llenarFila, false, 0,
+    {"MAX31865_A", SensorPT1000A::iniciar,
+     SensorPT1000A::actualizar, SensorPT1000A::llenarFila, false, 0,
      0, 0},
-    {"MAX31865_TUBO", SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
-     SensorPT1000Tubo::llenarFila, false, 0, 0, 0},
-    {"DS18B20", SensorDS18B20::iniciar, SensorDS18B20::actualizar,
-     SensorDS18B20::llenarFila, false, 0, 0, 0},
+    {"MAX31865_B", SensorPT1000B::iniciar, SensorPT1000B::actualizar,
+     SensorPT1000B::llenarFila, false, 0, 0, 0},
     {"PMS5003", SensorPMS5003::iniciar, SensorPMS5003::actualizar,
      SensorPMS5003::llenarFila, false, 0, 0, 0},
     {"GPS", SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
@@ -440,7 +437,7 @@ void loop() {
     SensorGeiger::actualizar(ahora);
     SensorGeiger::llenarFila(filaSCI);
 
-    SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_arm_C);
+    SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_ptA_C);
     filaSCI.pms_on = SensorPMS5003::estaEncendido() ? 1 : 0;
 
     filaSCI.reinit = (float)reinitTotal;
