@@ -80,8 +80,8 @@ platformio.ini           entornos teensy41 y adalogger, librerías fijadas
 ## Valores pendientes de verificar
 
 La mayoría de los pines y divisores de `REQUISITOS.md` §2.1 y §5 ya están
-decididos y fijados en `config_teensy.h`/`config_adalogger.h`. Quedan
-marcadas **[VERIFICAR]** solo una constante: no se inventa, se mide
+decididos y fijados en `config_teensy.h`/`config_adalogger.h`. Queda
+marcada **[VERIFICAR]** solo una constante: no se inventa, se mide
 antes del vuelo. `verificarConfiguracion()` (llamada desde `setup()` en
 ambas placas) la controla en cada arranque y avisa si sigue sin
 confirmar (en `META` en el Teensy, por Serial en el Adalogger):
