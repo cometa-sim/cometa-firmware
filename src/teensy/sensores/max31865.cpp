@@ -7,8 +7,8 @@
 // valores correctos para PT1000), y la idea de leer el fault byte para
 // diagnosticar la sonda. Cambios respecto del banco de prueba, para
 // cumplir REQUISITOS.md:
-//   - Dos instancias (brazo, CS 10; tubo, CS 9) con las constantes de
-//     config_teensy.h, no números sueltos.
+//   - Dos instancias con las constantes de config_teensy.h, no números
+//     sueltos: brazo en SPI (CS 10) y tubo en su propio bus, SPI1 (CS 9).
 //   - Presencia real: Adafruit_MAX31865::begin() devuelve true siempre,
 //     aunque no haya nada conectado. Acá se relee el registro de
 //     configuración: si no vuelve lo que se escribió, no hay chip.
@@ -50,46 +50,48 @@ const SPISettings AJUSTES_SPI(1000000, MSBFIRST, SPI_MODE1);
 const float CVD_A = 3.9083e-3f;
 const float CVD_B = -5.775e-7f;
 
-// Una sonda: el chip, su CS y la última lectura.
+// Una sonda: el chip, su bus SPI, su CS y la última lectura.
 struct SondaPT1000 {
   Adafruit_MAX31865 chip;
+  SPIClass *bus;
   uint8_t cs;
   bool datoNuevo;
   float temperatura;
   float falla;
 
-  explicit SondaPT1000(uint8_t pinCS)
-      : chip(pinCS), cs(pinCS), datoNuevo(false), temperatura(NAN), falla(NAN) {}
+  SondaPT1000(uint8_t pinCS, SPIClass *spi)
+      : chip(pinCS, spi), bus(spi), cs(pinCS), datoNuevo(false), temperatura(NAN),
+        falla(NAN) {}
 };
 
-SondaPT1000 brazo(COMETA_MAX31865_CS_ARM_PIN);
-SondaPT1000 tubo(COMETA_MAX31865_CS_TUBO_PIN);
+SondaPT1000 brazo(COMETA_MAX31865_CS_ARM_PIN, &SPI);
+SondaPT1000 tubo(COMETA_MAX31865_CS_TUBO_PIN, &COMETA_MAX31865_TUBO_SPI);
 
 // Lee n bytes desde el registro reg (lectura: bit 7 de la dirección en 0).
-void leerRegistros(uint8_t cs, uint8_t reg, uint8_t *datos, uint8_t n) {
-  SPI.beginTransaction(AJUSTES_SPI);
-  digitalWrite(cs, LOW);
-  SPI.transfer(reg & 0x7F);
+void leerRegistros(const SondaPT1000 &s, uint8_t reg, uint8_t *datos, uint8_t n) {
+  s.bus->beginTransaction(AJUSTES_SPI);
+  digitalWrite(s.cs, LOW);
+  s.bus->transfer(reg & 0x7F);
   for (uint8_t i = 0; i < n; i++) {
-    datos[i] = SPI.transfer(0xFF);
+    datos[i] = s.bus->transfer(0xFF);
   }
-  digitalWrite(cs, HIGH);
-  SPI.endTransaction();
+  digitalWrite(s.cs, HIGH);
+  s.bus->endTransaction();
 }
 
 // Escribe un registro (escritura: bit 7 de la dirección en 1).
-void escribirRegistro(uint8_t cs, uint8_t reg, uint8_t valor) {
-  SPI.beginTransaction(AJUSTES_SPI);
-  digitalWrite(cs, LOW);
-  SPI.transfer(reg | 0x80);
-  SPI.transfer(valor);
-  digitalWrite(cs, HIGH);
-  SPI.endTransaction();
+void escribirRegistro(const SondaPT1000 &s, uint8_t reg, uint8_t valor) {
+  s.bus->beginTransaction(AJUSTES_SPI);
+  digitalWrite(s.cs, LOW);
+  s.bus->transfer(reg | 0x80);
+  s.bus->transfer(valor);
+  digitalWrite(s.cs, HIGH);
+  s.bus->endTransaction();
 }
 
 bool configuracionCorrecta(const SondaPT1000 &s) {
   uint8_t config = 0;
-  leerRegistros(s.cs, REG_CONFIG, &config, 1);
+  leerRegistros(s, REG_CONFIG, &config, 1);
   return (config & CONFIG_MASCARA) == CONFIG_ESPERADA;
 }
 
@@ -137,7 +139,7 @@ bool actualizarSonda(SondaPT1000 &s) {
   }
 
   uint8_t rtd[2];
-  leerRegistros(s.cs, REG_RTD_MSB, rtd, 2);
+  leerRegistros(s, REG_RTD_MSB, rtd, 2);
   const uint16_t crudo = ((uint16_t)rtd[0] << 8 | rtd[1]) >> 1;  // bit 0 = falla
 
   // El fault byte va siempre al log (0 = sin falla) y la temperatura
@@ -146,9 +148,9 @@ bool actualizarSonda(SondaPT1000 &s) {
   // defecto, la librería lanza un ciclo de diagnóstico que reescribe la
   // configuración y apaga la conversión continua.
   uint8_t falla = 0;
-  leerRegistros(s.cs, REG_FALLAS, &falla, 1);
+  leerRegistros(s, REG_FALLAS, &falla, 1);
   if (falla != 0) {
-    escribirRegistro(s.cs, REG_CONFIG, CONFIG_ESPERADA | BIT_BORRAR_FALLAS);
+    escribirRegistro(s, REG_CONFIG, CONFIG_ESPERADA | BIT_BORRAR_FALLAS);
   }
   s.falla = falla;
   s.temperatura = temperaturaDesdeResistencia(crudo / 32768.0f * COMETA_MAX31865_RREF);
@@ -179,7 +181,14 @@ void llenarFila(FilaSCI &f) {
 
 namespace SensorPT1000Tubo {
 
-bool iniciar() { return iniciarSonda(tubo); }
+bool iniciar() {
+  // Antes de begin(): sin setMISO(), SPI1 tomaría el pin 1, que es el TX1
+  // del PMS5003.
+  COMETA_MAX31865_TUBO_SPI.setMOSI(COMETA_MAX31865_TUBO_MOSI_PIN);
+  COMETA_MAX31865_TUBO_SPI.setMISO(COMETA_MAX31865_TUBO_MISO_PIN);
+  COMETA_MAX31865_TUBO_SPI.setSCK(COMETA_MAX31865_TUBO_SCK_PIN);
+  return iniciarSonda(tubo);
+}
 
 bool actualizar(uint32_t ahora) {
   (void)ahora;

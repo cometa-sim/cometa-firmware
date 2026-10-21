@@ -146,8 +146,16 @@
 // -----------------------------------------------------------------------
 #define COMETA_MAX31865_RREF        4300.0
 #define COMETA_MAX31865_RNOMINAL    1000.0
-#define COMETA_MAX31865_CS_ARM_PIN  10  // brazo exterior
-#define COMETA_MAX31865_CS_TUBO_PIN 9   // tubo
+#define COMETA_MAX31865_CS_ARM_PIN  10  // brazo exterior, en SPI (MOSI 11, MISO 12, SCK 13)
+#define COMETA_MAX31865_CS_TUBO_PIN 9   // tubo, en SPI1
+// El tubo va en su propio bus, SPI1: cada MAX31865 se cablea directo a
+// sus pines del Teensy, sin repartir MOSI/MISO/SCK entre las dos placas,
+// y si uno deja su bus mal el otro no se entera. MISO1 por defecto es el
+// pin 1, que es el TX1 del PMS5003: se usa la alternativa, el 39.
+#define COMETA_MAX31865_TUBO_SPI      SPI1
+#define COMETA_MAX31865_TUBO_MOSI_PIN 26
+#define COMETA_MAX31865_TUBO_MISO_PIN 39
+#define COMETA_MAX31865_TUBO_SCK_PIN  27
 #define COMETA_MAX31865_WIRING      MAX31865_3WIRE
 
 // -----------------------------------------------------------------------

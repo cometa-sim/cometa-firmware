@@ -113,23 +113,23 @@ void escanearI2C() {
 // conversión continua, 3 hilos, 50 Hz). Si no, este valor dice por qué:
 // 0x00 o 0xFF = no hay respuesta en SDO (cable, alimentación, SDI/SDO
 // cruzados); otro valor = el chip contesta pero con otra configuración.
-uint8_t leerConfigMAX31865(uint8_t cs) {
-  SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
+uint8_t leerConfigMAX31865(SPIClass &bus, uint8_t cs) {
+  bus.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE1));
   digitalWrite(cs, LOW);
-  SPI.transfer(0x00);  // registro 0, lectura
-  const uint8_t valor = SPI.transfer(0xFF);
+  bus.transfer(0x00);  // registro 0, lectura
+  const uint8_t valor = bus.transfer(0xFF);
   digitalWrite(cs, HIGH);
-  SPI.endTransaction();
+  bus.endTransaction();
   return valor;
 }
 
-void diagnosticoMAX31865(uint8_t cs, const char *nombre) {
+void diagnosticoMAX31865(SPIClass &bus, uint8_t cs, const char *nombre) {
   Serial.print("  ");
   Serial.print(nombre);
   Serial.print(" (CS ");
   Serial.print(cs);
   Serial.print("): config ");
-  imprimirHex(leerConfigMAX31865(cs));
+  imprimirHex(leerConfigMAX31865(bus, cs));
   Serial.println(", esperado 0xD1 (0x00 o 0xFF = no contesta)");
 }
 
@@ -140,8 +140,8 @@ void imprimirBloqueos();
 void imprimirDiagnostico() {
   escanearI2C();
   Serial.println("SPI:");
-  diagnosticoMAX31865(COMETA_MAX31865_CS_ARM_PIN, "MAX31865 brazo");
-  diagnosticoMAX31865(COMETA_MAX31865_CS_TUBO_PIN, "MAX31865 tubo");
+  diagnosticoMAX31865(SPI, COMETA_MAX31865_CS_ARM_PIN, "MAX31865 brazo");
+  diagnosticoMAX31865(COMETA_MAX31865_TUBO_SPI, COMETA_MAX31865_CS_TUBO_PIN, "MAX31865 tubo");
   imprimirBloqueos();
   Serial.println();
 }
