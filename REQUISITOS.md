@@ -266,7 +266,7 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 | 2 × MAX31865 (PT1000 A y B) | SPI (A) y SPI1 (B) | A: MOSI **11**, MISO **12**, SCK **13**, CS **10**. B: MOSI1 **26**, MISO1 **39**, SCK1 **27**, CS **9** | 3 hilos. Un bus por placa: cada una cableada directo a sus pines. MISO1 en 39 porque el pin 1 es el TX1 del PMS5003 |
 | PMS5003 | UART | `Serial1`: RX pin **0**, TX pin **1** | MOSFET en pin **4** |
 | E220 (Adalogger) | UART | `Serial1`: TX (D1) → RXD, RX (D0) ← TXD | M0 = M1 = GND, ver §2.2 |
-| GGreg20 | interrupción | vía optoacoplador, pin **3** | |
+| GGreg20 | interrupción | OUT directo al pin **3**, sin optoacoplador | salida de 3,3 V activa baja y débil: sin carga externa, solo el pull-up interno. GND con su propio cable al riel − de la masa común |
 
 **I²C (Teensy).** SDA en pin **18**, SCL en pin **19** (bus por defecto de `Wire` en el Teensy 4.1) para todos los sensores I²C **menos el GPS**. El SAM-M8Q va **solo** en `Wire1`: SDA1 pin **17**, SCL1 pin **16**, sin ningún cable Qwiic hacia la cadena. En el banco, compartiendo el bus, dejaba SDA baja cada 1-3 min y se llevaba con él al ICM-20948 y al LTR390; en su propio bus, 19 min sin una sola recuperación (`COMETA_GPS_EN_WIRE1` en `config_teensy.h`).
 

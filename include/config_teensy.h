@@ -160,9 +160,13 @@
 #define COMETA_MAX31865_WIRING      MAX31865_3WIRE
 
 // -----------------------------------------------------------------------
-// §5 — Geiger GGreg20 (interrupción vía optoacoplador)
+// §5 — Geiger GGreg20: OUT directo al pin, sin optoacoplador. La salida
+// es lógica de 3,3 V, activa baja y muy débil: en el banco, cargarla con
+// el LED de un PC817 (de 0,9 a 6 mA) bloqueaba el pulso y el buzzer. Con
+// masa común, el optoacoplador tampoco aislaba nada. Alcanza el pull-up
+// interno del Teensy (INPUT_PULLUP en geiger.cpp).
 // -----------------------------------------------------------------------
-#define COMETA_GEIGER_PIN 3  // interrupción vía optoacoplador
+#define COMETA_GEIGER_PIN 3  // OUT del GGreg20, flanco de bajada
 
 // -----------------------------------------------------------------------
 // §3.6, §6 — PMS5003 (UART Serial1, controlado por MOSFET de canal N que

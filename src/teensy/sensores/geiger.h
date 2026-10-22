@@ -1,6 +1,6 @@
 // geiger.h
 //
-// Geiger GGreg20, interrupción vía optoacoplador en COMETA_GEIGER_PIN
+// Geiger GGreg20, salida OUT directa a COMETA_GEIGER_PIN
 // (REQUISITOS.md §4.3, §5). La ISR solo incrementa un contador; los
 // conteos se guardan por intervalo (cpi, dt_ms), sirven para el factor
 // de Fano.
