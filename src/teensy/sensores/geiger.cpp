@@ -11,7 +11,7 @@
 // El resto (iniciar/actualizar/llenarFila) está implementado a partir
 // del banco de prueba de los estudiantes (COMETA-Teensy41, main.cpp
 // hasta 6ba266c): pin 3 con pull-up interno, interrupción en el flanco
-// de bajada (el optoacoplador tira la línea a GND en cada pulso) y la
+// de bajada (la salida OUT del GGreg20 baja a GND en cada pulso) y la
 // lectura del contador con las interrupciones deshabilitadas.
 //
 // Cambio respecto del banco de prueba, para cumplir REQUISITOS.md §4.3

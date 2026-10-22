@@ -28,7 +28,7 @@ Si un tic se atrasa más de un período (por ejemplo, por el `flush()` de la SD 
 
 ### 1.2 Módulos de sensor
 
-Cada sensor del Teensy es un módulo en `src/teensy/sensores/` (un `.h`/`.cpp` por sensor; el MAX31865 es un solo archivo con dos instancias, brazo y tubo). Todos comparten la misma interfaz, un espacio de nombres por sensor con tres funciones:
+Cada sensor del Teensy es un módulo en `src/teensy/sensores/` (un `.h`/`.cpp` por sensor; el MAX31865 es un solo archivo con dos instancias, A y B). Todos comparten la misma interfaz, un espacio de nombres por sensor con tres funciones:
 
 ```cpp
 namespace SensorXxx {
@@ -53,7 +53,7 @@ namespace SensorXxx {
 
 - En el tic de **1000 ms**, una llamada a un módulo puede bloquear como mucho `COMETA_BLOQUEO_MAX_MS` = **20 ms** (`config_teensy.h`).
 - En el tic de **10 ms** no se bloquea nada: es el del ICM-20948 y el buffer de la ventana IMU.
-- Una espera más larga que esos 20 ms se parte en **arranque + recogida**: una pasada lanza la medición y se va, otra posterior la recoge cuando ya está lista. El caso es el **DS18B20**, cuya conversión a 12 bits tarda 750 ms: con `setWaitForConversion(false)` entrega un dato nuevo cada dos tics, y las filas del medio llevan la celda vacía (§4.2), que es lo correcto — no se repite el último valor.
+- Una espera más larga que esos 20 ms se parte en **arranque + recogida**: una pasada lanza la medición y se va, otra posterior la recoge cuando ya está lista, y las filas del medio llevan la celda vacía (§4.2), que es lo correcto — no se repite el último valor.
 - El **SHT45** bloquea 10 ms (el `delay()` interno de `getEvent()` con `SHT4X_HIGH_PRECISION` y sin calefactor): entra en el presupuesto, por eso no se parte en dos pasadas. Con el calefactor encendido ese `delay()` pasa a 110 o 1100 ms y dejaría de ser conforme.
 
 Estos 20 ms no descuadran la ventana IMU: el ICM-20948 se lee de su **FIFO**, no del registro instantáneo. La FIFO sigue llenándose a 100 Hz mientras el tic de 1000 ms trabaja, y el tic de 10 ms siguiente la vacía entera. Un retraso de 20 ms significa dos muestras que se leen juntas un poco después, no dos muestras perdidas. Lo que sí las perdería es bloquear **dentro** del tic de 10 ms, o dejar que la FIFO se desborde.
@@ -214,30 +214,29 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 | Tiempo | `t_ms`, `utc` |
 | GPS | `lat`, `lon`, `alt_m`, `vz_ms`, `vn_ms`, `ve_ms`, `sats`, `pdop`, `fix` |
 | MS8607 | `p_hPa`, `t_ms8607_C`, `rh_ms8607` |
-| PT1000 | `t_arm_C`, `t_tubo_C`, `err_arm`, `err_tubo` (fault byte del MAX31865) |
+| PT1000 | `t_ptA_C`, `t_ptB_C`, `err_ptA`, `err_ptB` (fault byte del MAX31865). A es la sonda exterior |
 | SHT45 | `rh_sht`, `t_sht_C` |
 | SCD30 | `co2_ppm`, `t_scd_C`, `p_inviata_hPa` |
-| DS18B20 | `t_cassa_C`, `t_pile_C`, `t_centro_C`, `t_scd_ds_C` |
 | LTR390 | `uva_raw`, `uv_gain`, `uv_res` (conteos crudos) |
 | ICM-20948 | `ax`, `ay`, `az`, `gx`, `gy`, `gz`, `mx`, `my`, `mz` |
 | PMS5003 | `pms_on`, `pm1`, `pm25`, `pm10`, `n03`, `n05`, `n10` |
 | Geiger | `cpi` (conteos en el intervalo), `dt_ms` (duración real del intervalo) |
-| Calidad | `q_pms`, `q_rh`, `q_arm`, `q_tubo`, `q_p` |
+| Calidad | `q_pms`, `q_rh`, `q_ptA`, `q_ptB`, `q_p` |
 | Sistema | `v_batt`, `i2c_recov`, `reinit`, `loop_ms` |
 
 `reinit` (después de `i2c_recov`): cuenta los intentos de `iniciar()` de todos los sensores, el primero al arrancar y cada reintento (§1.3). Es la suma; el desglose por sensor va en `META` (§4.7).
 
 `loop_ms`: duración real de esa pasada del tic de 1000 ms, medida de punta a punta — todos los módulos más el armado de la fila, cerrada justo antes de escribirla. Es el número que dice si el presupuesto de bloqueo de §1.2 se está respetando en vuelo: si se acerca a 1000, el tic se empieza a atrasar y hay que mirar qué módulo bloquea de más.
 
-57 columnas en total (`include/log_format.h`, `COMETA_SCI_NUM_COLUMNAS`).
+53 columnas en total (`include/log_format.h`, `COMETA_SCI_NUM_COLUMNAS`). Los DS18B20 no vuelan: sus cuatro columnas se quitaron.
 
 ### 4.4 Flags de calidad (0 = en especificación, 1 = fuera)
 
 | Flag | Se pone en 1 si |
 |---|---|
-| `q_pms` | T exterior (PT1000 brazo) < −10 °C |
+| `q_pms` | T exterior (PT1000 A) < −10 °C |
 | `q_rh` | T del SHT45 < −40 °C |
-| `q_arm`, `q_tubo` | T de esa sonda < −50 °C |
+| `q_ptA`, `q_ptB` | T de esa sonda < −50 °C |
 | `q_p` | `p_hPa` < 10 hPa |
 
 ### 4.5 Columnas de `L2` (Adalogger)
@@ -250,7 +249,7 @@ El termostato del pad calefactor **no** forma parte de la configuración de vuel
 
 ### 4.7 Contenido de `META`
 
-Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, ROM de cada DS18B20 con su posición, resultado de la configuración Airborne, dirección detectada de cada dispositivo I²C, la causa del último reinicio (§3.11), y (si ocurre) el disparo de la ventana IMU: cuál criterio, `t_ms`, UTC, altitud.
+Hash de Git del firmware, frecuencia de reloj, `RREF` y `RNOMINAL`, resultado de la configuración Airborne, dirección detectada de cada dispositivo I²C, la causa del último reinicio (§3.11), y (si ocurre) el disparo de la ventana IMU: cuál criterio, `t_ms`, UTC, altitud.
 
 Además, **una línea por sensor** con su nombre, si estaba presente al arranque y su contador propio de intentos de `iniciar()` (§1.3). La columna `reinit` de `SCI` dice que algo se reinició; este desglose dice cuál, que es la pregunta que se hace al analizar el vuelo.
 
@@ -264,11 +263,10 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 | SHT45 | I²C | 0x44 | en el brazo exterior |
 | ICM-20948 | I²C | **0x69** | breakout con AD0 alto, no 0x68. ±16 g, 100 Hz |
 | LTR390 | I²C | 0x53 | |
-| 2 × MAX31865 | SPI (brazo) y SPI1 (tubo) | brazo: MOSI **11**, MISO **12**, SCK **13**, CS **10**. Tubo: MOSI1 **26**, MISO1 **39**, SCK1 **27**, CS **9** | 3 hilos. Un bus por placa: cada una cableada directo a sus pines. MISO1 en 39 porque el pin 1 es el TX1 del PMS5003 |
+| 2 × MAX31865 (PT1000 A y B) | SPI (A) y SPI1 (B) | A: MOSI **11**, MISO **12**, SCK **13**, CS **10**. B: MOSI1 **26**, MISO1 **39**, SCK1 **27**, CS **9** | 3 hilos. Un bus por placa: cada una cableada directo a sus pines. MISO1 en 39 porque el pin 1 es el TX1 del PMS5003 |
 | PMS5003 | UART | `Serial1`: RX pin **0**, TX pin **1** | MOSFET en pin **4** |
 | E220 (Adalogger) | UART | `Serial1`: TX (D1) → RXD, RX (D0) ← TXD | M0 = M1 = GND, ver §2.2 |
-| 4 × DS18B20 | 1-Wire | pin **2**, pull-up 4,7 kΩ | |
-| GGreg20 | interrupción | vía optoacoplador, pin **3** | |
+| GGreg20 | interrupción | OUT directo al pin **3**, sin optoacoplador | salida de 3,3 V activa baja y débil: sin carga externa, solo el pull-up interno. GND con su propio cable al riel − de la masa común |
 
 **I²C (Teensy).** SDA en pin **18**, SCL en pin **19** (bus por defecto de `Wire` en el Teensy 4.1) para todos los sensores I²C **menos el GPS**. El SAM-M8Q va **solo** en `Wire1`: SDA1 pin **17**, SCL1 pin **16**, sin ningún cable Qwiic hacia la cadena. En el banco, compartiendo el bus, dejaba SDA baja cada 1-3 min y se llevaba con él al ICM-20948 y al LTR390; en su propio bus, 19 min sin una sola recuperación (`COMETA_GPS_EN_WIRE1` en `config_teensy.h`).
 
@@ -281,8 +279,6 @@ Además, **una línea por sensor** con su nombre, si estaba presente al arranque
 ```
 
 Con `430` / `100` el sensor devuelve números creíbles y equivocados.
-
-**DS18B20.** Identificar las cuatro por ROM antes del montaje (caja, pilas, centro del volumen, SCD30). Resolución 12 bits con `setWaitForConversion(false)`: nunca bloquear el loop 750 ms.
 
 **Geiger.** La ISR solo incrementa un contador. Guardar los conteos **por intervalo** (`cpi`, `dt_ms`): sirven para el factor de Fano. La lectura y el azaramiento del contador van en un único bloque con interrupciones deshabilitadas, para no perder ni duplicar un pulso que llegue justo en el medio:
 

@@ -81,19 +81,15 @@ inline void copiarUTC(char destino[COMETA_UTC_LARGO], const char *origen) {
   X(p_hPa,          F,    2) \
   X(t_ms8607_C,     F,    2) \
   X(rh_ms8607,      F,    1) \
-  X(t_arm_C,        F,    2) \
-  X(t_tubo_C,       F,    2) \
-  X(err_arm,        F,    0) \
-  X(err_tubo,       F,    0) \
+  X(t_ptA_C,        F,    2) \
+  X(t_ptB_C,        F,    2) \
+  X(err_ptA,        F,    0) \
+  X(err_ptB,        F,    0) \
   X(rh_sht,         F,    1) \
   X(t_sht_C,        F,    2) \
   X(co2_ppm,        F,    0) \
   X(t_scd_C,        F,    2) \
   X(p_inviata_hPa,  F,    0) \
-  X(t_cassa_C,      F,    2) \
-  X(t_pile_C,       F,    2) \
-  X(t_centro_C,     F,    2) \
-  X(t_scd_ds_C,     F,    2) \
   X(uva_raw,        F,    0) \
   X(uv_gain,        F,    0) \
   X(uv_res,         F,    0) \
@@ -117,8 +113,8 @@ inline void copiarUTC(char destino[COMETA_UTC_LARGO], const char *origen) {
   X(dt_ms,          U32N, 0) \
   X(q_pms,          F,    0) \
   X(q_rh,           F,    0) \
-  X(q_arm,          F,    0) \
-  X(q_tubo,         F,    0) \
+  X(q_ptA,          F,    0) \
+  X(q_ptB,          F,    0) \
   X(q_p,            F,    0) \
   X(v_batt,         F,    2) \
   X(i2c_recov,      F,    0) \
@@ -216,9 +212,9 @@ struct FilaSCI {
 };
 
 #define COMETA_SCI_NUM_COLUMNAS (0 COMETA_SCI_CAMPOS(COMETA_CAMPO_CUENTA))
-static_assert(COMETA_SCI_NUM_COLUMNAS == 57,
+static_assert(COMETA_SCI_NUM_COLUMNAS == 53,
               "SCI: el numero de columnas no coincide con REQUISITOS.md §4.3 "
-              "(se esperan 57, con `reinit` despues de `i2c_recov`)");
+              "(se esperan 53, con `reinit` despues de `i2c_recov`)");
 
 // Deja la fila en su estado "sin lecturas": todos los F/LL en NAN, utc
 // vacía, dt_ms en 0. t_ms no se toca (ver COMETA_CAMPO_LIMPIA_U32).

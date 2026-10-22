@@ -8,10 +8,10 @@
 // la conversión y recién después lee los 6 bytes; con
 // SHT4X_HIGH_PRECISION y sin calefactor ese delay es de 10 ms. Son 10 de
 // los COMETA_BLOQUEO_MAX_MS = 20 ms que §1.2 permite en el tic de
-// 1000 ms, así que entra sin partir la lectura en dos pasadas como el
-// DS18B20. Cuidado al copiar: con el calefactor encendido el mismo
-// delay pasa a 110 o 1100 ms y el módulo dejaría de ser conforme —
-// razón de más para el setHeater(SHT4X_NO_HEATER) de abajo.
+// 1000 ms, así que entra sin partir la lectura en dos pasadas. Cuidado
+// al copiar: con el calefactor encendido el mismo delay pasa a 110 o
+// 1100 ms y el módulo dejaría de ser conforme — razón de más para el
+// setHeater(SHT4X_NO_HEATER) de abajo.
 
 #include "sht45.h"
 

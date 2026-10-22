@@ -16,7 +16,6 @@
 #include "config_teensy.h"
 #include "log_format.h"
 
-#include "sensores/ds18b20.h"
 #include "sensores/geiger.h"
 #include "sensores/gps.h"
 #include "sensores/icm20948.h"
@@ -171,17 +170,6 @@ void abrirArchivoMETA() {
 // todavía sin confirmar)
 // -----------------------------------------------------------------------
 
-// Devuelve true si rom sigue siendo el centinela de ocho ceros: la sonda
-// todavía no fue identificada por ROM (REQUISITOS.md §5).
-bool romEsCentinela(const uint8_t rom[8]) {
-  for (uint8_t i = 0; i < 8; i++) {
-    if (rom[i] != 0x00) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Escribe "CONFIG INCOMPLETA: <nombre>" en META por cada centinela sin
 // confirmar (los valores [VERIFICAR] no se inventan).
 void reportarConfigIncompleta(const char *nombre) {
@@ -195,33 +183,8 @@ void reportarConfigIncompleta(const char *nombre) {
 // Recorre las constantes marcadas [VERIFICAR] en config_teensy.h y
 // registra en META cuáles siguen sin confirmar antes de volar. Los demás
 // centinelas de config_teensy.h ya se fijaron a valores decididos
-// (REQUISITOS.md §2.1, §5): solo quedan el timeout I²C y las cuatro ROM
-// de los DS18B20.
+// (REQUISITOS.md §2.1, §5): solo queda el timeout I²C.
 void verificarConfiguracion() {
-  {
-    const uint8_t romCassa[8] = COMETA_DS18B20_ROM_CASSA;
-    if (romEsCentinela(romCassa)) {
-      reportarConfigIncompleta("DS18B20_ROM_CASSA");
-    }
-  }
-  {
-    const uint8_t romPile[8] = COMETA_DS18B20_ROM_PILE;
-    if (romEsCentinela(romPile)) {
-      reportarConfigIncompleta("DS18B20_ROM_PILE");
-    }
-  }
-  {
-    const uint8_t romCentro[8] = COMETA_DS18B20_ROM_CENTRO;
-    if (romEsCentinela(romCentro)) {
-      reportarConfigIncompleta("DS18B20_ROM_CENTRO");
-    }
-  }
-  {
-    const uint8_t romScd[8] = COMETA_DS18B20_ROM_SCD;
-    if (romEsCentinela(romScd)) {
-      reportarConfigIncompleta("DS18B20_ROM_SCD");
-    }
-  }
   if (COMETA_I2C_TIMEOUT_MS == COMETA_MS_VERIFICAR) {
     reportarConfigIncompleta("I2C_TIMEOUT_MS");
   }
@@ -293,13 +256,11 @@ EstadoSensor sensores[] = {
      SensorSHT45::llenarFila, false, 0, 0, 0},
     {"LTR390", &busPrincipal, SensorLTR390::iniciar, SensorLTR390::actualizar,
      SensorLTR390::llenarFila, false, 0, 0, 0},
-    {"MAX31865_BRAZO", nullptr, SensorPT1000Brazo::iniciar,
-     SensorPT1000Brazo::actualizar, SensorPT1000Brazo::llenarFila, false, 0,
+    {"MAX31865_A", nullptr, SensorPT1000A::iniciar,
+     SensorPT1000A::actualizar, SensorPT1000A::llenarFila, false, 0,
      0, 0},
-    {"MAX31865_TUBO", nullptr, SensorPT1000Tubo::iniciar, SensorPT1000Tubo::actualizar,
-     SensorPT1000Tubo::llenarFila, false, 0, 0, 0},
-    {"DS18B20", nullptr, SensorDS18B20::iniciar, SensorDS18B20::actualizar,
-     SensorDS18B20::llenarFila, false, 0, 0, 0},
+    {"MAX31865_B", nullptr, SensorPT1000B::iniciar, SensorPT1000B::actualizar,
+     SensorPT1000B::llenarFila, false, 0, 0, 0},
     {"PMS5003", nullptr, SensorPMS5003::iniciar, SensorPMS5003::actualizar,
      SensorPMS5003::llenarFila, false, 0, 0, 0},
     {"GPS", busGPS, SensorGPS::iniciar, SensorGPS::actualizar, SensorGPS::llenarFila,
@@ -423,7 +384,7 @@ void leerBateria(FilaSCI &f) {
 // Flags de calidad (REQUISITOS.md §4.4)
 // -----------------------------------------------------------------------
 
-// Calcula q_pms, q_rh, q_arm, q_tubo, q_p a partir de los valores ya
+// Calcula q_pms, q_rh, q_ptA, q_ptB, q_p a partir de los valores ya
 // cargados en f: datos fuera de especificación se marcan, no se
 // descartan (REQUISITOS.md §3.7, §4.4). Se llama al final del tic, con
 // la fila ya completa, y recibe la fila por referencia como todo lo que
@@ -439,10 +400,10 @@ float flagBajoMinimo(float valor, float minimo) {
 }
 
 void calcularFlagsCalidad(FilaSCI &f) {
-  f.q_pms = flagBajoMinimo(f.t_arm_C, COMETA_Q_PMS_TEMP_ARM_MIN_C);
+  f.q_pms = flagBajoMinimo(f.t_ptA_C, COMETA_Q_PMS_TEMP_PTA_MIN_C);
   f.q_rh = flagBajoMinimo(f.t_sht_C, COMETA_Q_RH_TEMP_SHT_MIN_C);
-  f.q_arm = flagBajoMinimo(f.t_arm_C, COMETA_Q_ARM_TEMP_MIN_C);
-  f.q_tubo = flagBajoMinimo(f.t_tubo_C, COMETA_Q_TUBO_TEMP_MIN_C);
+  f.q_ptA = flagBajoMinimo(f.t_ptA_C, COMETA_Q_PTA_TEMP_MIN_C);
+  f.q_ptB = flagBajoMinimo(f.t_ptB_C, COMETA_Q_PTB_TEMP_MIN_C);
   f.q_p = flagBajoMinimo(f.p_hPa, COMETA_Q_P_MIN_HPA);
 }
 
@@ -720,16 +681,6 @@ void escribirHexMETA(uint8_t valor) {
   archivoMETA.print(valor, HEX);
 }
 
-void escribirROMMETA(const char *posicion, const uint8_t rom[8]) {
-  archivoMETA.print("ds18b20_");
-  archivoMETA.print(posicion);
-  archivoMETA.print(": ");
-  for (uint8_t i = 0; i < 8; i++) {
-    escribirHexMETA(rom[i]);
-    archivoMETA.print(i < 7 ? " " : "\n");
-  }
-}
-
 void escribirEstadoSensorMETA(const EstadoSensor &s) {
   archivoMETA.print("sensor: ");
   archivoMETA.print(s.nombre);
@@ -752,7 +703,7 @@ void escanearBusMETA(TwoWire &wire) {
 }
 
 // Escribe en META_nnn.TXT: hash de Git, frecuencia de reloj, RREF/
-// RNOMINAL, ROM de cada DS18B20, resultado Airborne, direcciones I²C
+// RNOMINAL, resultado Airborne, direcciones I²C
 // detectadas, la causa del último reinicio si el core la expone (si no,
 // [VERIFICAR], REQUISITOS.md §3.11), y datos del disparo IMU si ocurrió
 // (REQUISITOS.md §4.7).
@@ -778,15 +729,6 @@ void escribirMETA() {
   archivoMETA.println(COMETA_MAX31865_RREF, 1);
   archivoMETA.print("max31865_rnominal_ohm: ");
   archivoMETA.println(COMETA_MAX31865_RNOMINAL, 1);
-
-  const uint8_t romCassa[8] = COMETA_DS18B20_ROM_CASSA;
-  const uint8_t romPile[8] = COMETA_DS18B20_ROM_PILE;
-  const uint8_t romCentro[8] = COMETA_DS18B20_ROM_CENTRO;
-  const uint8_t romScd[8] = COMETA_DS18B20_ROM_SCD;
-  escribirROMMETA("cassa", romCassa);
-  escribirROMMETA("pile", romPile);
-  escribirROMMETA("centro", romCentro);
-  escribirROMMETA("scd", romScd);
 
   // Resultado del Airborne <1g en este arranque (§3.1). Sin GPS al
   // arrancar no hubo a quién mandárselo.
@@ -1001,7 +943,7 @@ void loop() {
     // El PMS5003 no se enciende/apaga con el criterio genérico de
     // arriba: decide según altitud y T exterior, con histéresis
     // (REQUISITOS.md §6), no según si "responde".
-    SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_arm_C);
+    SensorPMS5003::controlarEncendido(ahora, filaSCI.alt_m, filaSCI.t_ptA_C);
     // pms_on va en todas las filas, también con el sensor ausente: sin
     // eso no se distingue un cero de un sensor apagado (REQUISITOS.md §6).
     filaSCI.pms_on = SensorPMS5003::estaEncendido() ? 1 : 0;

@@ -1,6 +1,6 @@
 // max31865.cpp
 //
-// 2x MAX31865 + PT1000, brazo exterior y tubo (REQUISITOS.md §4.3, §5).
+// 2x MAX31865 + PT1000, A y B (REQUISITOS.md §4.3, §5).
 //
 // Base: el banco de prueba de los estudiantes (COMETA-Teensy41,
 // main.cpp): begin(MAX31865_3WIRE), RNOMINAL = 1000 y RREF = 4300 (los
@@ -8,7 +8,7 @@
 // diagnosticar la sonda. Cambios respecto del banco de prueba, para
 // cumplir REQUISITOS.md:
 //   - Dos instancias con las constantes de config_teensy.h, no números
-//     sueltos: brazo en SPI (CS 10) y tubo en su propio bus, SPI1 (CS 9).
+//     sueltos: A en SPI (CS 10) y B en su propio bus, SPI1 (CS 9).
 //   - Presencia real: Adafruit_MAX31865::begin() devuelve true siempre,
 //     aunque no haya nada conectado. Acá se relee el registro de
 //     configuración: si no vuelve lo que se escribió, no hay chip.
@@ -16,7 +16,7 @@
 //     único y espera ~75 ms con delay(), dos veces por tic. Acá el chip
 //     queda en conversión continua (autoConvert) y se lee el último
 //     resultado del registro RTD, sin esperar.
-//   - El fault byte va al log (err_arm / err_tubo) y se limpia.
+//   - El fault byte va al log (err_ptA / err_ptB) y se limpia.
 //   - La librería se usa solo para begin() y la configuración; las
 //     lecturas van por registro, con SPI directo.
 
@@ -64,8 +64,8 @@ struct SondaPT1000 {
         falla(NAN) {}
 };
 
-SondaPT1000 brazo(COMETA_MAX31865_CS_ARM_PIN, &SPI);
-SondaPT1000 tubo(COMETA_MAX31865_CS_TUBO_PIN, &COMETA_MAX31865_TUBO_SPI);
+SondaPT1000 sondaA(COMETA_MAX31865_CS_A_PIN, &SPI);
+SondaPT1000 sondaB(COMETA_MAX31865_CS_B_PIN, &COMETA_MAX31865_B_SPI);
 
 // Lee n bytes desde el registro reg (lectura: bit 7 de la dirección en 0).
 void leerRegistros(const SondaPT1000 &s, uint8_t reg, uint8_t *datos, uint8_t n) {
@@ -160,47 +160,47 @@ bool actualizarSonda(SondaPT1000 &s) {
 
 }  // namespace
 
-namespace SensorPT1000Brazo {
+namespace SensorPT1000A {
 
-bool iniciar() { return iniciarSonda(brazo); }
+bool iniciar() { return iniciarSonda(sondaA); }
 
 bool actualizar(uint32_t ahora) {
   (void)ahora;
-  return actualizarSonda(brazo);
+  return actualizarSonda(sondaA);
 }
 
 void llenarFila(FilaSCI &f) {
-  if (!brazo.datoNuevo) {
+  if (!sondaA.datoNuevo) {
     return;  // celda vacía: no hubo lectura nueva en esta fila (REQUISITOS.md §4.2)
   }
-  f.t_arm_C = brazo.temperatura;
-  f.err_arm = brazo.falla;
+  f.t_ptA_C = sondaA.temperatura;
+  f.err_ptA = sondaA.falla;
 }
 
-}  // namespace SensorPT1000Brazo
+}  // namespace SensorPT1000A
 
-namespace SensorPT1000Tubo {
+namespace SensorPT1000B {
 
 bool iniciar() {
   // Antes de begin(): sin setMISO(), SPI1 tomaría el pin 1, que es el TX1
   // del PMS5003.
-  COMETA_MAX31865_TUBO_SPI.setMOSI(COMETA_MAX31865_TUBO_MOSI_PIN);
-  COMETA_MAX31865_TUBO_SPI.setMISO(COMETA_MAX31865_TUBO_MISO_PIN);
-  COMETA_MAX31865_TUBO_SPI.setSCK(COMETA_MAX31865_TUBO_SCK_PIN);
-  return iniciarSonda(tubo);
+  COMETA_MAX31865_B_SPI.setMOSI(COMETA_MAX31865_B_MOSI_PIN);
+  COMETA_MAX31865_B_SPI.setMISO(COMETA_MAX31865_B_MISO_PIN);
+  COMETA_MAX31865_B_SPI.setSCK(COMETA_MAX31865_B_SCK_PIN);
+  return iniciarSonda(sondaB);
 }
 
 bool actualizar(uint32_t ahora) {
   (void)ahora;
-  return actualizarSonda(tubo);
+  return actualizarSonda(sondaB);
 }
 
 void llenarFila(FilaSCI &f) {
-  if (!tubo.datoNuevo) {
+  if (!sondaB.datoNuevo) {
     return;  // celda vacía: no hubo lectura nueva en esta fila (REQUISITOS.md §4.2)
   }
-  f.t_tubo_C = tubo.temperatura;
-  f.err_tubo = tubo.falla;
+  f.t_ptB_C = sondaB.temperatura;
+  f.err_ptB = sondaB.falla;
 }
 
-}  // namespace SensorPT1000Tubo
+}  // namespace SensorPT1000B
